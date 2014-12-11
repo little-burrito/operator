@@ -257,7 +257,7 @@ public class ConsoleGUI : MonoBehaviour {
         cmd = new Command( "list", new string[] { "ls", "dir" }, "Displays a list of the selected content.", this, null, null, baseCommandCategories.GENERAL );
         {
             // List allmissions
-            subCmd = new Command( "allmissions", new string[] { "mlist", "ml" }, "Lists all missions.", this, ( CommandInput input ) => {
+            subCmd = new Command( "allmissions", new string[] { }, "Lists all missions.", this, ( CommandInput input ) => {
                 bool listNotEmpty = false;
 
                 // Not accepted mission
@@ -400,14 +400,15 @@ public class ConsoleGUI : MonoBehaviour {
         commands.Add( cmd );
 
         // Log in
-        cmd = new Command( "login", new string[] { "logon" }, "Logs you in.", this, ( CommandInput input ) => {
+        cmd = new Command( "login", new string[] { }, "Logs you in.", this, ( CommandInput input ) => {
             StartCoroutine( displayWelcomeMessage() );
         }, new string[] { }, baseCommandCategories.GENERAL );
         cmd.requiresLogin = false;
+        cmd.requiresLogout = true;
         commands.Add( cmd );
 
         // Log out
-        cmd = new Command( "logout", new string[] { "logoff" }, "Logs you out.", this, ( CommandInput input ) => {
+        cmd = new Command( "logout", new string[] { }, "Logs you out.", this, ( CommandInput input ) => {
             StartCoroutine( cutsceneLogout() );
         }, new string[] { }, baseCommandCategories.GENERAL );
         cmd.requiresLogin = true;
@@ -552,6 +553,15 @@ public class ConsoleGUI : MonoBehaviour {
             subCmd.requiresLogin = false;
             cmd.subCommands.Add( subCmd );
         }
+        commands.Add( cmd );
+
+        // Quit
+        cmd = new Command( "quit", new string[] { "exit" }, "Quits the game.", this, ( CommandInput input ) => {
+            Application.Quit();
+            addOutput( "I'm just messing with you! There is no quit :)" );
+        }, null, baseCommandCategories.GENERAL );
+        cmd.requiresLogin = false;
+        cmd.requiresLogout = true;
         commands.Add( cmd );
 
         // END OF COMMANDS
@@ -982,6 +992,7 @@ public class ConsoleGUI : MonoBehaviour {
                 while ( i < commandList.Count && inputIterator < inputs.Length ) {
                     string input = inputs[ inputIterator ];
                     bool match = false;
+                    bool matchesHelp = false;
                     string matchingWord = "";
                     // If it's not the last input parameter, it needs to match perfectly
                     if ( inputIterator != inputs.Length - 1 ) {
@@ -1014,11 +1025,56 @@ public class ConsoleGUI : MonoBehaviour {
                             }
                         }
                     }
+                    // Match against -help
+                    if ( !match && inputIterator != 0 ) {
+                        if ( helpCommand.name.StartsWith( input ) ) {
+                            match = true;
+                            matchesHelp = true;
+                            matchingWord = helpCommand.name;
+                        }
+                        if ( !match ) {
+                            foreach ( string alias in helpCommand.aliases ) {
+                                if ( alias.StartsWith( input ) ) {
+                                    match = true;
+                                    matchesHelp = true;
+                                    matchingWord = alias;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
                     if ( match ) {
                         currentAutoCompleteSuggestion += matchingWord + " ";
                         commandList = commandList[ i ].subCommands;
                         i = 0;
                         inputIterator++;
+
+                        // Match against where there are no sub commands
+                        if ( commandList.Count == 0 ) { // Don't suggest -help after -help
+                            if ( inputIterator < inputs.Length ) {
+                                input = inputs[ inputIterator ];
+                                match = false;
+                                if ( !matchesHelp ) {
+                                    if ( helpCommand.name.StartsWith( input ) ) {
+                                        match = true;
+                                        currentAutoCompleteSuggestion += helpCommand.name + " ";
+                                    }
+                                    if ( !match ) {
+                                        foreach ( string alias in helpCommand.aliases ) {
+                                            if ( alias.StartsWith( input ) ) {
+                                                match = true;
+                                                currentAutoCompleteSuggestion += alias + " ";
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if ( match ) {
+                                        inputIterator++;
+                                    }
+                                }
+                            }
+                        }
                     } else {
                         i++;
                     }
@@ -1093,7 +1149,7 @@ public class ConsoleGUI : MonoBehaviour {
         }
         // Autocomplete
         if ( currentInput.Length > 0 && currentAutoCompleteSuggestion.Length > returnValue.Length ) {
-            returnValue += "<color=" + autoCompleteSuggestionColor + ">" + currentAutoCompleteSuggestion.Substring( returnValue.Length ) + "</color>";
+            returnValue += formatStr( currentAutoCompleteSuggestion.Substring( returnValue.Length ), strFormat.AUTOCOMPLETE );
         }
         return returnValue;
     }
@@ -1286,7 +1342,7 @@ public class ConsoleGUI : MonoBehaviour {
     //
     ////////////////////////////////////////
     // Formatting
-    public enum strFormat { BASE_COMMAND, ALIAS, SUB_COMMAND, CURRENT_SUB_COMMAND, DESCRIPTION, PARAMETER_NAME, PARAMETER_IN_INSTRUCTION, HEADLINE, ID };
+    public enum strFormat { BASE_COMMAND, ALIAS, SUB_COMMAND, CURRENT_SUB_COMMAND, DESCRIPTION, PARAMETER_NAME, PARAMETER_IN_INSTRUCTION, HEADLINE, ID, AUTOCOMPLETE };
     public string formatStr( string str, strFormat format ) {
         switch ( format ) {
             case strFormat.BASE_COMMAND:
@@ -1299,6 +1355,8 @@ public class ConsoleGUI : MonoBehaviour {
                 return "<i>" + str + "</i>";
             case strFormat.PARAMETER_NAME:
                 return "<" + str + ">";
+            case strFormat.AUTOCOMPLETE:
+                return "<color=" + autoCompleteSuggestionColor + ">" + str + "</color>";
             default:
                 return str;
         }
@@ -1454,10 +1512,12 @@ public class ConsoleGUI : MonoBehaviour {
         string cmdTree = "";
         if ( cmd.coreFunction != null ) {
             string coreFunctionParameters = "";
-            foreach ( string param in cmd.coreFunctionParameterNames ) {
-                coreFunctionParameters += " " + formatStr( param, strFormat.PARAMETER_NAME );
+            if ( cmd.coreFunctionParameterNames != null ) {
+                foreach ( string param in cmd.coreFunctionParameterNames ) {
+                    coreFunctionParameters += " " + formatStr( param, strFormat.PARAMETER_NAME );
+                }
+                cmdTree += formatStr( cmd.name, strFormat.BASE_COMMAND ) + coreFunctionParameters + " - " + formatStr( cmd.description, strFormat.DESCRIPTION );
             }
-            cmdTree += formatStr( cmd.name, strFormat.BASE_COMMAND ) + coreFunctionParameters + " - " + formatStr( cmd.description, strFormat.DESCRIPTION );
         }
         foreach ( Command subCmd in cmd.subCommands ) {
             CommandInput newInput = new CommandInput( input.fullCommandString + " " + subCmd.name );
@@ -1474,10 +1534,12 @@ public class ConsoleGUI : MonoBehaviour {
         string cmdTree = "";
         if ( cmd.coreFunction != null ) {
             string coreFunctionParameters = "";
-            foreach ( string param in cmd.coreFunctionParameterNames ) {
-                coreFunctionParameters += " " + formatStr( param, strFormat.PARAMETER_NAME );
+            if ( cmd.coreFunctionParameterNames != null ) {
+                foreach ( string param in cmd.coreFunctionParameterNames ) {
+                    coreFunctionParameters += " " + formatStr( param, strFormat.PARAMETER_NAME );
+                }
+                cmdTree += "\n" + input.parentCommandsString + formatStr( cmd.name, strFormat.CURRENT_SUB_COMMAND ) + coreFunctionParameters + " - " + formatStr( cmd.description, strFormat.DESCRIPTION );
             }
-            cmdTree += "\n" + input.parentCommandsString + formatStr( cmd.name, strFormat.CURRENT_SUB_COMMAND ) + coreFunctionParameters + " - " + formatStr( cmd.description, strFormat.DESCRIPTION );
         }
         foreach ( Command subCmd in cmd.subCommands ) {
             CommandInput newInput = new CommandInput( input.fullCommandString + " " + subCmd.name );
@@ -1547,13 +1609,25 @@ public class ConsoleGUI : MonoBehaviour {
         addOutput( "Command " + formatCmd( cmd.name ) + " requires the user to be logged in." );
         addOutput( "Enter " + formatCmd( "login" ) + " to log in." );
     }
+    public void outputRequiresLogout( Command cmd ) {
+        addOutput( "Command " + formatCmd( cmd.name ) + " requires the user to be logged out." );
+        addOutput( "Enter " + formatCmd( "logout" ) + " to log out." );
+    }
     public void outputRequiresConnection( Command cmd ) {
         addOutput( "Command " + formatCmd( cmd.name ) + " requires an active connection to an agent." );
-        addOutput( "Use the " + formatCmd( "connect" ) + " command to connect to an agent. Enter " + formatCmd( "connect", "-help" ) + " for more information." );
+        addOutput( "Use the command " + formatCmd( "connect" ) + " to connect to an agent. Enter " + formatCmd( "connect", "-help" ) + " for more information." );
+    }
+    public void outputRequiresNoConnection( Command cmd ) {
+        addOutput( "Command " + formatCmd( cmd.name ) + " requires that there is no active connection to an agent." );
+        addOutput( "Use the command " + formatCmd( "disconnect", "-y" ) + " to disconnect the from the current agent." );
     }
     public void outputRequiresTarget( Command cmd ) {
-        addOutput( "Command " + formatCmd( cmd.name ) + " requires the user to be logged in." );
-        addOutput( "Use the " + formatCmd( "target" ) + " command to target an object. Enter " + formatCmd( "target", "-help" ) + " for more information." );
+        addOutput( "Command " + formatCmd( cmd.name ) + " requires there is an active target." );
+        addOutput( "Use the command " + formatCmd( "target" ) + " to target an object. Enter " + formatCmd( "target", "-help" ) + " for more information." );
+    }
+    public void outputRequiresNoTarget( Command cmd ) {
+        addOutput( "Command " + formatCmd( cmd.name ) + " requires that there is nothing targeted." );
+        addOutput( "Use the command " + formatCmd( "target", "deselect" ) + " to deselect the current target." );
     }
     /*public void outputExpectedFormat( Command cmd, CommandInput input ) {
         addOutput( "Unexpected format: " + input.fullCommandString );
@@ -1621,6 +1695,7 @@ public class ConsoleGUI : MonoBehaviour {
             addOutput( formatStr( "General instructions:", strFormat.HEADLINE ) );
             addOutput( "You control everything using your console." );
             addOutput( "If you want more information about a specific command, or a shorthand for its parameters, you can enter " + formatCmd( "<command>", "-help" ) );
+            addOutput( "If you enter receive a " + formatStr( "suggestion", strFormat.AUTOCOMPLETE ) + " as you enter a command, press <enter> to enter that suggestion, <tab> to add the suggestion to what you're typing, or just ignore it and keep typing." );
             addOutput( "To list available commands, enter " + formatCmd( "help" ) + " followed by one of the following chapter titles:" );
             addOutput( "TARGET" );
             addOutput( "MISSION" );

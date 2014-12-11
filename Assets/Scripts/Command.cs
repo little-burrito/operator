@@ -34,6 +34,9 @@ public class Command {
     public bool requiresLogin = true;
     public bool requiresConnection = false;
     public bool requiresTarget = false;
+    public bool requiresLogout = false;
+    public bool requiresNoConnection = false;
+    public bool requiresNoTarget = false;
     private ConsoleGUI parent;
     public ConsoleGUI.baseCommandCategories commandCategory;
 
@@ -70,6 +73,18 @@ public class Command {
         }
         if ( requiresTarget && parent.target == null ) {
             parent.outputRequiresTarget( this );
+            return;
+        }
+        if ( requiresLogout && parent.loggedIn ) {
+            parent.outputRequiresLogout( this );
+            return;
+        }
+        if ( requiresNoConnection && parent.connected ) {
+            parent.outputRequiresNoConnection( this );
+            return;
+        }
+        if ( requiresNoTarget && parent.target != null ) {
+            parent.outputRequiresNoTarget( this );
             return;
         }
         // Try to run a sub command
