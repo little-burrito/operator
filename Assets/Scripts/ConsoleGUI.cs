@@ -4,10 +4,13 @@ using System.Collections.Generic;
 
 public class ConsoleGUI : MonoBehaviour {
 
+    public enum baseCommandCategories { TARGET, MISSION, GENERAL, SUB_COMMAND }
+
     private List<CommandInput> commandHistory;
     private List<string> outputHistory;
     private string currentInput;
     private string currentInputBackup;
+    private string currentAutoCompleteSuggestion;
     private int currentSelectedCommandHistory;
     private int currentMarkerPosition;
     private int currentlyVisibleLine = 0;
@@ -23,7 +26,7 @@ public class ConsoleGUI : MonoBehaviour {
     private bool cursorBlink = false;
     public float cursorBlinkTime = 0.5f;
 
-    public float lineAddTime = 0.01f;
+    public float lineAddTime = 0.02f;
     public float missionCompletionTestInterval = 1.0f;
 
     private Transform lineFeedSound;
@@ -48,6 +51,9 @@ public class ConsoleGUI : MonoBehaviour {
     private List<Command> commands;
 
     private bool canAddMissionObjectives = true;
+    public string autoCompleteSuggestionColor = "#666666ff";
+
+    public List<Note> notes;
 
     ////////////////////////////////////////
     //
@@ -60,14 +66,15 @@ public class ConsoleGUI : MonoBehaviour {
         commandHistory = new List<CommandInput>();
         outputHistory = new List<string>();
         missions = new List<Mission>();
-        currentInput = currentInputBackup = "";
+        currentInput = currentInputBackup = currentAutoCompleteSuggestion = "";
         currentMarkerPosition = 0;
         currentSelectedCommandHistory = -1;
+        notes = new List<Note>();
         cursorBlink = true;
         lineFeedSound = transform.Find( "Line feed sound" );
         StartCoroutine( displayWelcomeMessage() );
-        Invoke( "blinkCursor", cursorBlinkTime );
-        Invoke( "showNextLine", lineAddTime );
+        Invoke( "blinkCursor", cursorBlinkTime * timeScale );
+        Invoke( "showNextLine", lineAddTime * timeScale );
         Invoke( "testMissionCompletion", missionCompletionTestInterval );
         currentMission = new Mission( "", "", -1, 0, "" );
     }
@@ -104,26 +111,8 @@ public class ConsoleGUI : MonoBehaviour {
         // COMMANDS
         //////////////////
         helpCommand = new Command( "-help", new string[] { "-?", "/?", "-h", "/h", "/help" }, "Displays this help file.", this, ( CommandInput input ) => {
-            /*CommandInput newInput = input;
-            newInput.fullCommandString = newInput.fullCommandString.Replace( " -help", "" );
-            newInput.fullCommandString = newInput.fullCommandString.Replace( " -?", "" );
-            newInput.fullCommandString = newInput.fullCommandString.Replace( " /?", "" );
-            newInput.fullCommandString = newInput.fullCommandString.Replace( " -h", "" );
-            newInput.fullCommandString = newInput.fullCommandString.Replace( " /h", "" );
-            newInput.fullCommandString = newInput.fullCommandString.Replace( " /help", "" );
-            string[] separators = new string[] { " " };
-            string[] splitString = newInput.fullCommandString.Split( separators, System.StringSplitOptions.RemoveEmptyEntries );
-            newInput.commandName = splitString[ splitString.Length - 1 ];
-            newInput.parentCommandsString = newInput.parentCommandsString.Replace( formatStr( newInput.commandName, strFormat.SUB_COMMAND ) + " ", "" );
-            /*newInput.parentCommandsString = newInput.parentCommandsString.Replace( formatStr( "-help", strFormat.SUB_COMMAND ) + " ", "" );
-            newInput.parentCommandsString = newInput.parentCommandsString.Replace( formatStr( "-?", strFormat.SUB_COMMAND ) + " ", "" );
-            newInput.parentCommandsString = newInput.parentCommandsString.Replace( formatStr( "/?", strFormat.SUB_COMMAND ) + " ", "" );
-            newInput.parentCommandsString = newInput.parentCommandsString.Replace( formatStr( "-h", strFormat.SUB_COMMAND ) + " ", "" );
-            newInput.parentCommandsString = newInput.parentCommandsString.Replace( formatStr( "/h", strFormat.SUB_COMMAND ) + " ", "" );
-            newInput.parentCommandsString = newInput.parentCommandsString.Replace( formatStr( "/help", strFormat.SUB_COMMAND ) + " ", "" );*/
-            //outputHelpForInput( newInput );
             outputHelpForInput( input );
-        }, new string[] { } );
+        }, new string[] { }, baseCommandCategories.SUB_COMMAND );
         helpCommand.requiresLogin = false;
         helpCommand.requiresConnection = false;
         helpCommand.requiresTarget = false;
@@ -135,19 +124,8 @@ public class ConsoleGUI : MonoBehaviour {
         Command subSubCmd;
         Command subSubSubCmd;
 
-        // Echo
-        cmd = new Command( "echo", new string[] { "ec" }, "Outputs text to the console.", this, ( CommandInput input ) => {
-            if ( input.fullCommandString.Length > input.commandName.Length ) {
-                addOutput( input.fullCommandString.Substring( input.commandName.Length + 1 ) );
-            } else {
-                outputHelpForInput( input );
-            }
-        }, new string[] { "text to output" } );
-        cmd.requiresLogin = false;
-        commands.Add( cmd );
-
         // Help
-        cmd = new Command( "help", new string[] { "h", "?" }, "Displays a full list of available commands.", this, ( CommandInput input ) => {
+        cmd = new Command( "help", new string[] { "?" }, "Displays a full list of available commands.", this, ( CommandInput input ) => {
             if ( input.parameters.Count > 0 ) {
                 Command c = getBaseCommandFromString( input.parameters[ 0 ] );
                 if ( c != null ) {
@@ -155,13 +133,30 @@ public class ConsoleGUI : MonoBehaviour {
                     return;
                 }
             }
-            outputHelpFile();
-        }, null );
+            outputHelpFile( input );
+        }, null, baseCommandCategories.GENERAL );
         cmd.requiresLogin = false;
+        {
+            subCmd = new Command( "target", new string[] { }, "Displays the help file for target related commands.", this, ( CommandInput input ) => {
+                outputHelpFile( input );
+            }, new string[] { }, baseCommandCategories.SUB_COMMAND );
+            subCmd.requiresLogin = false;
+            cmd.subCommands.Add( subCmd );
+            subCmd = new Command( "mission", new string[] { }, "Displays the help file for mission related commands.", this, ( CommandInput input ) => {
+                outputHelpFile( input );
+            }, new string[] { }, baseCommandCategories.SUB_COMMAND );
+            subCmd.requiresLogin = false;
+            cmd.subCommands.Add( subCmd );
+            subCmd = new Command( "general", new string[] { }, "Displays the help file for general commands.", this, ( CommandInput input ) => {
+                outputHelpFile( input );
+            }, new string[] { }, baseCommandCategories.SUB_COMMAND );
+            subCmd.requiresLogin = false;
+            cmd.subCommands.Add( subCmd );
+        }
         commands.Add( cmd );
 
         // Target
-        cmd = new Command( "target", new string[] { "targ", "select", "sel" }, "Targets the object with the specified id.", this, ( CommandInput input ) => {
+        cmd = new Command( "target", new string[] { "select" }, "Targets the object with the specified id.", this, ( CommandInput input ) => {
             if ( input.parameters.Count == 1 ) {
                 GameObject[] objects = GameObject.FindGameObjectsWithTag( "Interactable" );
                 Interactable interactable = null;
@@ -182,75 +177,61 @@ public class ConsoleGUI : MonoBehaviour {
             } else {
                 outputHelpForInput( input );
             }
-        }, new string[] { "target id" } );
+        }, new string[] { "target id" }, baseCommandCategories.TARGET );
         cmd.requiresConnection = true;
         cmd.requiresTarget = false;
         {
-            subCmd = new Command( "deselect", new string[] { "des", "-d", "/d", "d" }, "Deselects the current target.", this, ( CommandInput input ) => {
+            subCmd = new Command( "deselect", new string[] { "-d", "/d" }, "Deselects the current target.", this, ( CommandInput input ) => {
                 StartCoroutine( cutsceneDeselectTarget() );
-            }, new string[] { } );
+            }, new string[] { }, baseCommandCategories.SUB_COMMAND );
             subCmd.requiresTarget = true;
             cmd.subCommands.Add( subCmd );
         }
         commands.Add( cmd );
 
-        // Restart
-        cmd = new Command( "restart", new string[] { }, "Restarts the game.", this, ( CommandInput input ) => {
-            if ( input.parameters.Count == 1 ) {
-                if ( input.parameters[ 0 ] == "-y" ) {
-                    Application.LoadLevel( 0 );
-                    Destroy( this );
+        // Connect
+        cmd = new Command( "connect", new string[] { }, "Connects to an agent.", this, null, null, baseCommandCategories.MISSION );
+        {
+            subCmd = new Command( "agent", new string[] { }, "Connects to the agent with the specified id.", this, ( CommandInput input ) => {
+                if ( input.parameters.Count == 1 ) {
+                    bool found = false;
+                    int agentId;
+                    if ( int.TryParse( input.parameters[ 0 ], out agentId ) ) {
+                        Mission mission = null;
+                        foreach ( Mission m in missions ) {
+                            if ( m.agentId == agentId ) {
+                                mission = m;
+                                if ( m.accepted && !m.completed ) {
+                                    StartCoroutine( cutsceneConnect( mission, agentId ) );
+                                    found = true;
+                                }
+                                break;
+                            }
+                        }
+                        if ( !found ) {
+                            if ( mission == null ) {
+                                addOutput( "Unable to find agent " + formatStr( "#" + input.parameters[ 0 ], strFormat.PARAMETER_IN_INSTRUCTION ) );
+                            } else {
+                                if ( !mission.accepted ) {
+                                    addOutput( "Mission " + formatStr( "#" + mission.id, strFormat.PARAMETER_IN_INSTRUCTION ) + " is not accepted. To connect to this agent you must first " + formatCmd( "accept", new string[] { "mission", "" + mission.id } ) + "." );
+                                } else if ( mission.completed ) {
+                                    addOutput( "Connection request denied. The mission is already completed." );
+                                }
+                            }
+                        }
+                    } else {
+                        addOutput( "" + input.parameters[ 0 ] + " is not a valid agent id." );
+                    }
                 } else {
                     outputHelpForInput( input );
                 }
-            } else {
-                outputHelpForInput( input );
-            }
-        }, new string[] { "-y" } );
-        cmd.requiresLogin = false;
-        commands.Add( cmd );
-
-        // Connect
-        cmd = new Command( "connect", new string[] { "conn" }, "Connects to an agent.", this, null, null );
-        subCmd = new Command( "agent", new string[] { "a" }, "Connects to the agent with the specified id.", this, ( CommandInput input ) => {
-            if ( input.parameters.Count == 1 ) {
-                bool found = false;
-                int agentId;
-                if ( int.TryParse( input.parameters[ 0 ], out agentId ) ) {
-                    Mission mission = null;
-                    foreach ( Mission m in missions ) {
-                        if ( m.agentId == agentId ) {
-                            mission = m;
-                            if ( m.accepted && !m.completed ) {
-                                StartCoroutine( cutsceneConnect( mission, agentId ) );
-                                found = true;
-                            }
-                            break;
-                        }
-                    }
-                    if ( !found ) {
-                        if ( mission == null ) {
-                            addOutput( "Unable to find agent " + formatStr( "#" + input.parameters[ 0 ], strFormat.PARAMETER_IN_INSTRUCTION ) );
-                        } else {
-                            if ( !mission.accepted ) {
-                                addOutput( "Mission " + formatStr( "#" + mission.id, strFormat.PARAMETER_IN_INSTRUCTION ) + " is not accepted. To connect to this agent you must first " + formatCmd( "accept", new string[] { "mission", "" + mission.id } ) + "." );
-                           } else if ( mission.completed ) {
-                               addOutput( "Connection request denied. The mission is already completed." );
-                           }
-                        }
-                    }
-                } else {
-                    addOutput( "" + input.parameters[ 0 ] + " is not a valid agent id." );
-                }
-            } else {
-                outputHelpForInput( input );
-            }
-        }, new string[] { "agent id" } );
-        cmd.subCommands.Add( subCmd );
+            }, new string[] { "agent id" }, baseCommandCategories.SUB_COMMAND );
+            cmd.subCommands.Add( subCmd );
+        }
         commands.Add( cmd );
 
         // Disconnect
-        cmd = new Command( "disconnect", new string[] { "disc" }, "Disconnects from an agent.", this, ( CommandInput input ) => {
+        cmd = new Command( "disconnect", new string[] { }, "Disconnects from an agent.", this, ( CommandInput input ) => {
             if ( input.parameters.Count == 1 ) {
                 if ( input.parameters[ 0 ] == "-y" ) {
                     StartCoroutine( cutsceneDisconnect() );
@@ -260,44 +241,23 @@ public class ConsoleGUI : MonoBehaviour {
             } else {
                 outputHelpForInput( input );
             }
-        }, new string[] { "-y" } );
+        }, new string[] { "-y" }, baseCommandCategories.MISSION );
         cmd.requiresConnection = true;
-        commands.Add( cmd );
-
-        // Log in
-        cmd = new Command( "login", new string[] { "logon" }, "Logs you in.", this, ( CommandInput input ) => {
-            StartCoroutine( displayWelcomeMessage() );
-        }, new string[] { } );
-        cmd.requiresLogin = false;
-        commands.Add( cmd );
-
-        // Log out
-        cmd = new Command( "logout", new string[] { "logoff" }, "Logs you out.", this, ( CommandInput input ) => {
-            StartCoroutine( cutsceneLogout() );
-        }, new string[] { } );
-        cmd.requiresLogin = true;
         commands.Add( cmd );
 
         // Watch
         cmd = new Command( "watch", new string[] { }, "Gives live feedback from a targeted system.", this, ( CommandInput input ) => {
             addOutput( "Not yet implemented" );
-        }, new string[] { "system id" } );
+        }, new string[] { "system id" }, baseCommandCategories.TARGET );
         cmd.requiresConnection = true;
         cmd.requiresTarget = true;
         commands.Add( cmd );
 
-        // Clear
-        cmd = new Command( "clear", new string[] { "cls" }, "Clear the screen from text.", this, ( CommandInput input ) => {
-            outputHistory = new List<string>();
-        }, new string[] { "system id" } );
-        cmd.requiresLogin = false;
-        commands.Add( cmd );
-
         // List
-        cmd = new Command( "list", new string[] { "ls", "dir" }, "Displays a list of the selected content.", this, null, null );
-        // {
-            // List MissionList
-            subCmd = new Command( "missionlist", new string[] { "missionslist", "missions", "mlist", "ml" }, "Lists all missions.", this, ( CommandInput input ) => {
+        cmd = new Command( "list", new string[] { "ls", "dir" }, "Displays a list of the selected content.", this, null, null, baseCommandCategories.GENERAL );
+        {
+            // List allmissions
+            subCmd = new Command( "allmissions", new string[] { "mlist", "ml" }, "Lists all missions.", this, ( CommandInput input ) => {
                 bool listNotEmpty = false;
 
                 // Not accepted mission
@@ -342,12 +302,12 @@ public class ConsoleGUI : MonoBehaviour {
                 if ( !listNotEmpty ) {
                     addOutput( "Your mission list is empty" );
                 }
-            }, new string[] { } );
+            }, new string[] { }, baseCommandCategories.SUB_COMMAND );
             cmd.subCommands.Add( subCmd );
 
             // List Mission
-            subCmd = new Command( "mission", new string[] { "m" }, "Lists details for the selected mission.", this, ( CommandInput input ) => {
-                if ( input.parameters.Count == 1  || ( input.parameters.Count == 0 && currentMission.accepted ) ) {
+            subCmd = new Command( "misson", new string[] { "singlemission" }, "Lists details for the selected mission.", this, ( CommandInput input ) => {
+                if ( input.parameters.Count == 1 || ( input.parameters.Count == 0 && currentMission.accepted ) ) {
                     if ( input.parameters.Count == 0 && currentMission.accepted ) {
                         // Do current mission
                         input.parameters.Add( "" + currentMission.id );
@@ -372,17 +332,17 @@ public class ConsoleGUI : MonoBehaviour {
                 } else {
                     outputHelpForInput( input );
                 }
-            }, new string[] { "mission id" } );
+            }, new string[] { "mission id" }, baseCommandCategories.SUB_COMMAND );
             cmd.subCommands.Add( subCmd );
 
             // List Agents
-            subCmd = new Command( "agents", new string[] { "a" }, "Lists available agents.", this, ( CommandInput input ) => {
+            subCmd = new Command( "agents", new string[] { }, "Lists available agents.", this, ( CommandInput input ) => {
                 bool listNotEmpty = false;
                 bool didOutput = false;
                 foreach ( Mission m in missions ) {
                     if ( m.accepted && !m.completed ) {
                         if ( !didOutput ) {
-                            addOutput( formatStr( "AVAILABLE AGENTS (ACTIVE MISSIONS):", strFormat.HEADLINE ) );
+                            addOutput( formatStr( "AVAILABLE AGENTS:", strFormat.HEADLINE ) );
                             didOutput = true;
                             listNotEmpty = true;
                         }
@@ -394,7 +354,7 @@ public class ConsoleGUI : MonoBehaviour {
                 foreach ( Mission m in missions ) {
                     if ( !m.accepted ) {
                         if ( !didOutput ) {
-                            addOutput( formatStr( "UNAVAILABLE AGENTS (PENDING MISSIONS):", strFormat.HEADLINE ) );
+                            addOutput( formatStr( "UNAVAILABLE AGENTS (MISSIONS PENDING):", strFormat.HEADLINE ) );
                             didOutput = true;
                             listNotEmpty = true;
                         }
@@ -402,25 +362,94 @@ public class ConsoleGUI : MonoBehaviour {
                         didOutput = true;
                     }
                 }
+                if ( didOutput ) {
+                    addOutput( "Enter " + formatCmd( "accept", "mission", "mission id" ) + " to accept a mission or enter " + formatCmd( "list", "allmissions" ) + " for a list of available missions." );
+                }
 
                 if ( !listNotEmpty ) {
                     addOutput( "Your agent list is empty" );
                 }
-            }, new string[] { } );
+            }, new string[] { }, baseCommandCategories.SUB_COMMAND );
             cmd.subCommands.Add( subCmd );
-        // }
+
+            // List Notes
+            subCmd = new Command( "notes", new string[] { }, "Lists your notes.", this, ( CommandInput input ) => {
+                outputNotes();
+            }, new string[] { }, baseCommandCategories.SUB_COMMAND );
+            cmd.subCommands.Add( subCmd );
+        }
+        cmd.requiresLogin = false;
+        commands.Add( cmd );
+
+        // Clear
+        cmd = new Command( "clear", new string[] { "cls" }, "Clear the screen from text.", this, ( CommandInput input ) => {
+            outputHistory = new List<string>();
+        }, new string[] { "system id" }, baseCommandCategories.GENERAL );
+        cmd.requiresLogin = false;
+        commands.Add( cmd );
+
+        // Note
+        cmd = new Command( "note", new string[] { "notes" }, "Display or add notes.", this, ( CommandInput input ) => {
+            if ( input.parameters.Count == 0 ) {
+                outputNotes();
+            } else {
+                notes.Add( new Note( input.fullCommandString.Substring( input.commandName.Length + 1 ), this ) );
+                addOutput( "Note added" );
+            }
+        }, new string[] { "note to add" }, baseCommandCategories.GENERAL );
+        commands.Add( cmd );
+
+        // Log in
+        cmd = new Command( "login", new string[] { "logon" }, "Logs you in.", this, ( CommandInput input ) => {
+            StartCoroutine( displayWelcomeMessage() );
+        }, new string[] { }, baseCommandCategories.GENERAL );
+        cmd.requiresLogin = false;
+        commands.Add( cmd );
+
+        // Log out
+        cmd = new Command( "logout", new string[] { "logoff" }, "Logs you out.", this, ( CommandInput input ) => {
+            StartCoroutine( cutsceneLogout() );
+        }, new string[] { }, baseCommandCategories.GENERAL );
+        cmd.requiresLogin = true;
+        commands.Add( cmd );
+
+        // Restart
+        cmd = new Command( "restart", new string[] { }, "Restarts the game.", this, ( CommandInput input ) => {
+            if ( input.parameters.Count == 1 ) {
+                if ( input.parameters[ 0 ] == "-y" ) {
+                    Application.LoadLevel( 0 );
+                    Destroy( this );
+                } else {
+                    outputHelpForInput( input );
+                }
+            } else {
+                outputHelpForInput( input );
+            }
+        }, new string[] { "-y" }, baseCommandCategories.GENERAL );
+        cmd.requiresLogin = false;
+        commands.Add( cmd );
+
+        // Echo
+        cmd = new Command( "echo", new string[] { }, "Outputs text to the console.", this, ( CommandInput input ) => {
+            if ( input.parameters.Count > 0 ) {
+                addOutput( input.fullCommandString.Substring( input.commandName.Length + 1 ) );
+            } else {
+                outputHelpForInput( input );
+            }
+        }, new string[] { "text to output" }, baseCommandCategories.GENERAL );
+        cmd.requiresLogin = false;
         commands.Add( cmd );
 
         // Scan
-        cmd = new Command( "scan", new string[] { "sc" }, "Scans and outputs the systems of the current target", this, ( CommandInput input ) => {
+        cmd = new Command( "scan", new string[] { }, "Scans and outputs the systems of the current target", this, ( CommandInput input ) => {
             StartCoroutine( cutsceneScan() );
-        }, new string[] { } );
+        }, new string[] { }, baseCommandCategories.TARGET );
         cmd.requiresConnection = true;
         cmd.requiresTarget = true;
         commands.Add( cmd );
 
         // Accept
-        cmd = new Command( "accept", new string[] { }, "Accepts a mission.", this, null, null );
+        cmd = new Command( "accept", new string[] { }, "Accepts a mission.", this, null, null, baseCommandCategories.MISSION );
         {
             // Mission
             subCmd = new Command( "mission", new string[] { "m" }, "Accepts the selected mission.", this, ( CommandInput input ) => {
@@ -437,58 +466,58 @@ public class ConsoleGUI : MonoBehaviour {
                             }
                         }
                         if ( !acceptedMission ) {
-                            addOutput( "Unable to accept mission " + formatStr( input.parameters[ 0 ], strFormat.PARAMETER_IN_INSTRUCTION ) + " - mission id not found. Enter " + formatCmd( "list", "missions" ) + " to see available missions and their ids." );
+                            addOutput( "Unable to accept mission " + formatStr( input.parameters[ 0 ], strFormat.PARAMETER_IN_INSTRUCTION ) + " - mission id not found. Enter " + formatCmd( "list", "allmissions" ) + " to see available missions and their ids." );
                         }
                     } else {
-                        addOutput( formatStr( input.parameters[ 0 ], strFormat.PARAMETER_IN_INSTRUCTION ) + " - is not a valid mission id. Enter " + formatCmd( "list", "missions" ) + " to see available missions and their ids." );
+                        addOutput( formatStr( input.parameters[ 0 ], strFormat.PARAMETER_IN_INSTRUCTION ) + " - is not a valid mission id. Enter " + formatCmd( "list", "allmissions" ) + " to see available missions and their ids." );
                     }
                 } else {
                     outputHelpForInput( input );
                 }
-            }, new string[] { "mission id" } );
+            }, new string[] { "mission id" }, baseCommandCategories.SUB_COMMAND );
             cmd.subCommands.Add( subCmd );
         }
         commands.Add( cmd );
 
         // Enable
-        cmd = new Command( "enable", new string[] { "en" }, "Enables the selected system on the current target.", this, ( CommandInput input ) => {
+        cmd = new Command( "enable", new string[] { }, "Enables the selected system on the current target.", this, ( CommandInput input ) => {
             StartCoroutine( cutsceneEnable( input ) );
-        }, new string[] { "system id" } );
+        }, new string[] { "system id" }, baseCommandCategories.TARGET );
         cmd.requiresConnection = true;
         cmd.requiresTarget = true;
         commands.Add( cmd );
 
         // Disable
-        cmd = new Command( "disable", new string[] { "dis" }, "Disables the selected system on the current target.", this, ( CommandInput input ) => {
+        cmd = new Command( "disable", new string[] { }, "Disables the selected system on the current target.", this, ( CommandInput input ) => {
             StartCoroutine( cutsceneDisable( input ) );
-        }, new string[] { "system id" } );
+        }, new string[] { "system id" }, baseCommandCategories.TARGET );
         cmd.requiresConnection = true;
         cmd.requiresTarget = true;
         commands.Add( cmd );
 
         // Options
-        cmd = new Command( "options", new string[] { "opt", "opts" }, "Displays and changes options.", this, null, null );
+        cmd = new Command( "options", new string[] { "opts" }, "Displays and changes options.", this, null, null, baseCommandCategories.GENERAL );
         cmd.requiresLogin = false;
         {
             // Sound options
-            subCmd = new Command( "sound", new string[] { "snd" }, "Displays and changes sound options.", this, null, null );
+            subCmd = new Command( "sound", new string[] { "snd" }, "Displays and changes sound options.", this, null, null, baseCommandCategories.SUB_COMMAND );
             subCmd.requiresLogin = false;
             {
                 // Linefeed sound options
-                subSubCmd = new Command( "linefeed", new string[] { "lf" }, "Displays whether linefeed sound is on or off", this, ( CommandInput input ) => {
+                subSubCmd = new Command( "linefeed", new string[] { }, "Displays whether linefeed sound is on or off", this, ( CommandInput input ) => {
                     if ( input.parameters.Count <= 0 ) {
                         addOutput( "Linefeed sound effect is " + ( lineFeedSoundEnabled ? "on" : "off" ) + "." );
                     } else {
                         outputHelpForInput( input );
                     }
-                }, new string[] { } );
+                }, new string[] { }, baseCommandCategories.SUB_COMMAND );
                 subSubCmd.requiresLogin = false;
                 {
                     // Linefeed on
                     subSubSubCmd = new Command( "on", new string[] { }, "Enables the linefeed sound effect.", this, ( CommandInput input ) => {
                         lineFeedSoundEnabled = true;
                         addOutput( "Linefeed sound effect enabled." );
-                    }, new string[] { } );
+                    }, new string[] { }, baseCommandCategories.SUB_COMMAND );
                     subSubSubCmd.requiresLogin = false;
                     subSubCmd.subCommands.Add( subSubSubCmd );
 
@@ -496,7 +525,7 @@ public class ConsoleGUI : MonoBehaviour {
                     subSubSubCmd = new Command( "off", new string[] { }, "Disables the linefeed sound effect.", this, ( CommandInput input ) => {
                         lineFeedSoundEnabled = false;
                         addOutput( "Linefeed sound effect disabled." );
-                    }, new string[] { } );
+                    }, new string[] { }, baseCommandCategories.SUB_COMMAND );
                     subSubSubCmd.requiresLogin = false;
                     subSubCmd.subCommands.Add( subSubSubCmd );
                 }
@@ -505,7 +534,7 @@ public class ConsoleGUI : MonoBehaviour {
             cmd.subCommands.Add( subCmd );
 
             // Timescale options
-            subCmd = new Command( "timescale", new string[] { "ts" }, "Displays and changes the time scale multiplier. 1 is normal speed, 0 makes everything instant.", this, ( CommandInput input ) => {
+            subCmd = new Command( "timescale", new string[] { }, "Displays and changes the time scale multiplier. 1 is normal speed, 0 makes everything instant.", this, ( CommandInput input ) => {
                 if ( input.parameters.Count == 1 ) {
                     float ts;
                     if ( float.TryParse( input.parameters[ 0 ], out ts ) ) {
@@ -519,13 +548,23 @@ public class ConsoleGUI : MonoBehaviour {
                 } else {
                     outputHelpForInput( input );
                 }
-            }, new string[] { "number" } );
+            }, new string[] { "number" }, baseCommandCategories.SUB_COMMAND );
             subCmd.requiresLogin = false;
             cmd.subCommands.Add( subCmd );
         }
         commands.Add( cmd );
 
         // END OF COMMANDS
+    }
+
+    void outputNotes() {
+        if ( notes.Count > 0 ) {
+            foreach ( Note note in notes ) {
+                note.output();
+            }
+        } else {
+            addOutput( "You haven't taken any notes yet. Enter " + formatCmd( "note", new string[] { }, "your note" ) + " to take a note." );
+        }
     }
 
     // Connect cutscene
@@ -745,14 +784,19 @@ public class ConsoleGUI : MonoBehaviour {
             commandHistory = new List<CommandInput>();
         }
 
+        bool didReceiveInput = false;
 	    // Process input
         foreach ( char c in Input.inputString ) {
+            didReceiveInput = true;
             if ( c == "\b"[ 0 ] ) {
                 // Backspace
                 if ( currentInput.Length != 0 ) {
                     if ( Input.GetKey( KeyCode.LeftControl ) || Input.GetKey( KeyCode.RightControl ) || Input.GetKey( KeyCode.LeftAlt ) || Input.GetKey( KeyCode.RightAlt ) ) {
                         // Remove full word
                         bool done = false;
+                        while ( currentMarkerPosition > 0 && currentInput[ currentMarkerPosition - 1 ] == " "[ 0 ] ) {
+                            inputRemoveCharacter();
+                        }
                         if ( currentMarkerPosition > 0 ) {
                             if ( currentInput[ currentMarkerPosition - 1 ] == " "[ 0 ] ) {
                                 done = true;
@@ -769,9 +813,6 @@ public class ConsoleGUI : MonoBehaviour {
                                     break;
                                 }
                             }
-                            while ( currentMarkerPosition > 0 && currentInput[ currentMarkerPosition - 1 ] == " "[ 0 ] ) {
-                                inputRemoveCharacter();
-                            }
                         }
                     } else {
                         // Remove single character
@@ -782,12 +823,20 @@ public class ConsoleGUI : MonoBehaviour {
             } else if ( c == "\n"[ 0 ] || c == "\r"[ 0 ] ) {
                 // Enter
                 if ( currentInput.Length > 0 ) {
-                    CommandInput command = new CommandInput( currentInput );
+                    CommandInput command;
+                    if ( currentAutoCompleteSuggestion.Length != 0 ) {
+                        command = new CommandInput( currentAutoCompleteSuggestion );
+                    } else {
+                        command = new CommandInput( currentInput );
+                    }
                     execute( command );
                 }
                 resetCursorBlink();
             } else if ( ( int )c == 127 ) {
                 // Remove full word
+                while ( currentMarkerPosition > 0 && currentInput[ currentMarkerPosition - 1 ] == " "[ 0 ] ) {
+                    inputRemoveCharacter();
+                }
                 bool done = false;
                 if ( currentMarkerPosition > 0 ) {
                     if ( currentInput[ currentMarkerPosition - 1 ] == " "[ 0 ] ) {
@@ -805,9 +854,6 @@ public class ConsoleGUI : MonoBehaviour {
                             break;
                         }
                     }
-                    while ( currentMarkerPosition > 0 && currentInput[ currentMarkerPosition - 1 ] == " "[ 0 ] ) {
-                        inputRemoveCharacter();
-                    }
                 }
             } else {
                 inputAddCharacter( c );
@@ -821,6 +867,9 @@ public class ConsoleGUI : MonoBehaviour {
                     currentMarkerPosition--;
                 }
             } else {
+                while ( currentMarkerPosition > 0 && currentInput[ currentMarkerPosition - 1 ] == " "[ 0 ] ) {
+                    currentMarkerPosition--;
+                }
                 bool done = false;
                 if ( currentMarkerPosition > 0 ) {
                     if ( currentInput[ currentMarkerPosition - 1 ] == " "[ 0 ] ) {
@@ -838,12 +887,10 @@ public class ConsoleGUI : MonoBehaviour {
                             break;
                         }
                     }
-                    while ( currentMarkerPosition > 0 && currentInput[ currentMarkerPosition - 1 ] == " "[ 0 ] ) {
-                        currentMarkerPosition--;
-                    }
                 }
             }
             resetCursorBlink();
+            didReceiveInput = true;
         }
         if ( Input.GetKeyDown( KeyCode.RightArrow ) ) {
             if ( !Input.GetKey( KeyCode.LeftControl ) && !Input.GetKey( KeyCode.RightControl ) && !Input.GetKey( KeyCode.LeftAlt ) && !Input.GetKey( KeyCode.RightAlt ) ) {
@@ -851,6 +898,9 @@ public class ConsoleGUI : MonoBehaviour {
                     currentMarkerPosition++;
                 }
             } else {
+                while ( currentMarkerPosition < currentInput.Length && currentInput[ currentMarkerPosition ] == " "[ 0 ] ) {
+                    currentMarkerPosition++;
+                }
                 bool done = false;
                 if ( currentMarkerPosition < currentInput.Length - 1 ) {
                     if ( currentInput[ currentMarkerPosition ] == " "[ 0 ] ) {
@@ -868,24 +918,27 @@ public class ConsoleGUI : MonoBehaviour {
                             break;
                         }
                     }
-                    while ( currentMarkerPosition < currentInput.Length && currentInput[ currentMarkerPosition ] == " "[ 0 ] ) {
-                        currentMarkerPosition++;
-                    }
                 }
             }
             resetCursorBlink();
+            didReceiveInput = true;
         }
         if ( Input.GetKeyDown( KeyCode.UpArrow ) ) {
             loadCommandHistoryToInput( currentSelectedCommandHistory + 1 );
+            didReceiveInput = true;
         }
         if ( Input.GetKeyDown( KeyCode.DownArrow ) ) {
             loadCommandHistoryToInput( currentSelectedCommandHistory - 1 );
+            didReceiveInput = true;
         }
         if ( Input.GetKeyDown( KeyCode.Delete ) ) {
             if ( !Input.GetKey( KeyCode.LeftControl ) && !Input.GetKey( KeyCode.RightControl ) && !Input.GetKey( KeyCode.LeftAlt ) && !Input.GetKey( KeyCode.RightAlt ) ) {
                 inputRemoveCharacterAfter();
-            } else {
+            } else { // Remove full word
                 bool done = false;
+                while ( currentMarkerPosition < currentInput.Length - 1 && currentInput[ currentMarkerPosition ] == " "[ 0 ] ) {
+                    inputRemoveCharacterAfter();
+                }
                 if ( currentMarkerPosition < currentInput.Length ) {
                     if ( currentInput[ currentMarkerPosition ] == " "[ 0 ] ) {
                         done = true;
@@ -902,20 +955,85 @@ public class ConsoleGUI : MonoBehaviour {
                             break;
                         }
                     }
-                    while ( currentMarkerPosition < currentInput.Length - 1 && currentInput[ currentMarkerPosition ] == " "[ 0 ] ) {
-                        inputRemoveCharacterAfter();
-                    }
                 }
             }
             resetCursorBlink();
+            didReceiveInput = true;
         }
         if ( Input.GetKeyDown( KeyCode.Home ) ) {
             currentMarkerPosition = 0;
             resetCursorBlink();
+            didReceiveInput = true;
         }
         if ( Input.GetKeyDown( KeyCode.End ) ) {
             currentMarkerPosition = currentInput.Length;
             resetCursorBlink();
+            didReceiveInput = true;
+        }
+
+        // Autocomplete
+        if ( didReceiveInput ) {
+            currentAutoCompleteSuggestion = "";
+            string[] inputs = currentInput.Split( new string[] { " " }, System.StringSplitOptions.RemoveEmptyEntries );
+            if ( inputs.Length > 0 ) {
+                List<Command> commandList = commands;
+                int inputIterator = 0;
+                int i = 0;
+                while ( i < commandList.Count && inputIterator < inputs.Length ) {
+                    string input = inputs[ inputIterator ];
+                    bool match = false;
+                    string matchingWord = "";
+                    // If it's not the last input parameter, it needs to match perfectly
+                    if ( inputIterator != inputs.Length - 1 ) {
+                        if ( commandList[ i ].name == input ) {
+                            match = true;
+                            matchingWord = commandList[ i ].name;
+                        }
+                        if ( !match ) {
+                            foreach ( string alias in commandList[ i ].aliases ) {
+                                if ( alias == input ) {
+                                    match = true;
+                                    matchingWord = alias;
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        // Otherwise at just needs to begin with the same letters
+                        if ( commandList[ i ].name.StartsWith( input ) ) {
+                            match = true;
+                            matchingWord = commandList[ i ].name;
+                        }
+                        if ( !match ) {
+                            foreach ( string alias in commandList[ i ].aliases ) {
+                                if ( alias.StartsWith( input ) ) {
+                                    match = true;
+                                    matchingWord = alias;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if ( match ) {
+                        currentAutoCompleteSuggestion += matchingWord + " ";
+                        commandList = commandList[ i ].subCommands;
+                        i = 0;
+                        inputIterator++;
+                    } else {
+                        i++;
+                    }
+                }
+                if ( inputIterator != inputs.Length ) {
+                    currentAutoCompleteSuggestion = "";
+                }
+            }
+        }
+        if ( Input.GetKeyDown( KeyCode.Tab ) ) {
+            if ( currentAutoCompleteSuggestion.Length > 0 ) {
+                currentInput = currentAutoCompleteSuggestion;
+                currentMarkerPosition = currentInput.Length;
+                resetCursorBlink();
+            }
         }
 
         // Set input backup unless we're editing a previous command
@@ -958,7 +1076,11 @@ public class ConsoleGUI : MonoBehaviour {
         string returnValue, buffer = currentInput;
         string blink = "█";
         if ( !cursorBlink ) {
-            blink = " ";
+            if ( currentAutoCompleteSuggestion.Length == 0 ) {
+                blink = " ";
+            } else {
+                blink = "";
+            }
         }
         if ( currentMarkerPosition > 0 ) {
             returnValue = buffer.Substring( 0, currentMarkerPosition );
@@ -968,6 +1090,10 @@ public class ConsoleGUI : MonoBehaviour {
             }
         } else {
             returnValue = blink + buffer;
+        }
+        // Autocomplete
+        if ( currentInput.Length > 0 && currentAutoCompleteSuggestion.Length > returnValue.Length ) {
+            returnValue += "<color=" + autoCompleteSuggestionColor + ">" + currentAutoCompleteSuggestion.Substring( returnValue.Length ) + "</color>";
         }
         return returnValue;
     }
@@ -985,7 +1111,7 @@ public class ConsoleGUI : MonoBehaviour {
             currentInput = currentInputBackup;
         } else if ( commandHistoryIndex == -2 ) {
             currentSelectedCommandHistory = -1;
-            currentInput = currentInputBackup = "";
+            currentInput = currentInputBackup = currentAutoCompleteSuggestion = "";
         }
         currentMarkerPosition = currentInput.Length;
         resetCursorBlink();
@@ -1001,7 +1127,7 @@ public class ConsoleGUI : MonoBehaviour {
         commandHistory.Insert( 0, command );
         addOutput( "" );
         addOutput( "> " + command.fullCommandString );
-        currentInput = currentInputBackup = ""; // Will this work? :)
+        currentInput = currentInputBackup = currentAutoCompleteSuggestion = ""; // Will this work? :)
         currentMarkerPosition = 0;
         currentSelectedCommandHistory = -1;
         runCommand( command );
@@ -1488,14 +1614,53 @@ public class ConsoleGUI : MonoBehaviour {
     public void outputCommandNotYetImplemented( CommandInput cmd ) {
         addOutput( "This command has not yet been implemented." );
     }*/
-    public void outputHelpFile( ) {
+    public void outputHelpFile( CommandInput originalInput ) {
         addOutput( "=== HELP FILE ===" );
-        addOutput( formatStr( "General instructions:", strFormat.HEADLINE ) );
-        addOutput( "You control everything using your console." );
-        addOutput( "If you want more information about a specific command, or a shorthand for its parameters, you can enter " + formatCmd( "<command>", "-help" ) );
-        addOutput( formatStr( "List of available commands:", strFormat.HEADLINE ) );
-        foreach ( Command cmd in commands ) {
-            addOutput( formatCmd( cmd.name ) + " - " + formatStr( cmd.description, strFormat.DESCRIPTION ) );
+        CommandInput input = new CommandInput( originalInput.fullCommandString );
+        if ( input.parameters.Count == 0 ) {
+            addOutput( formatStr( "General instructions:", strFormat.HEADLINE ) );
+            addOutput( "You control everything using your console." );
+            addOutput( "If you want more information about a specific command, or a shorthand for its parameters, you can enter " + formatCmd( "<command>", "-help" ) );
+            addOutput( "To list available commands, enter " + formatCmd( "help" ) + " followed by one of the following chapter titles:" );
+            addOutput( "TARGET" );
+            addOutput( "MISSION" );
+            addOutput( "GENERAL" );
+            addOutput( "Example: " + formatCmd( "help", "general" ) );
+        } else {
+            addOutput( formatStr( "List of available commands for chapter " + input.parameters[ 0 ].ToUpper(), strFormat.HEADLINE ) );
+            switch ( input.parameters[ 0 ].ToLower() ) {
+                case "target": {
+                    foreach ( Command cmd in commands ) {
+                        if ( cmd.commandCategory == baseCommandCategories.TARGET ) {
+                            addOutput( formatCmd( cmd.name ) + " - " + formatStr( cmd.description, strFormat.DESCRIPTION ) );
+                        }
+                    }
+                    break;
+                    }
+
+                case "mission": {
+                    foreach ( Command cmd in commands ) {
+                        if ( cmd.commandCategory == baseCommandCategories.MISSION ) {
+                            addOutput( formatCmd( cmd.name ) + " - " + formatStr( cmd.description, strFormat.DESCRIPTION ) );
+                        }
+                    }
+                    break;
+                    }
+
+                case "general": {
+                    foreach ( Command cmd in commands ) {
+                        if ( cmd.commandCategory == baseCommandCategories.GENERAL ) {
+                            addOutput( formatCmd( cmd.name ) + " - " + formatStr( cmd.description, strFormat.DESCRIPTION ) );
+                        }
+                    }
+                    break;
+                    }
+
+                default: {
+                    addOutput( "Unknown chapter: " + formatStr( input.parameters[ 0 ], strFormat.PARAMETER_IN_INSTRUCTION ) );
+                    break;
+                    }
+            }
         }
         /*addOutput( "Starting and ending" );
         addOutput( " connect (conn) - connects to an agent" );
@@ -1515,7 +1680,7 @@ public class ConsoleGUI : MonoBehaviour {
         addOutput( " logout - logs you out" );
         addOutput( " restart (r) - restart the game" );*/
         addOutput( "" );
-        addOutput( "To view currently available missions, enter " + formatCmd( "list", "missions" ) );
+        addOutput( "To view currently available missions, enter " + formatCmd( "list", "allmissions" ) );
     }
 
     ////////////////////////////////////////
@@ -1528,18 +1693,18 @@ public class ConsoleGUI : MonoBehaviour {
             currentlyVisibleLine--;
             playLineFeedSound();
         }
-        Invoke( "showNextLine", lineAddTime );
+        Invoke( "showNextLine", lineAddTime * timeScale );
     }
     void blinkCursor() {
         cursorBlink = !cursorBlink;
-        Invoke( "blinkCursor", cursorBlinkTime );
+        Invoke( "blinkCursor", cursorBlinkTime * timeScale );
     }
     void resetCursorBlink() {
         cursorBlink = true;
         if ( IsInvoking( "blinkCursor" ) ) {
             CancelInvoke( "blinkCursor" );
         }
-        Invoke( "blinkCursor", cursorBlinkTime );
+        Invoke( "blinkCursor", cursorBlinkTime * timeScale );
     }
     void OnGUI() {
         // Background
@@ -1698,4 +1863,23 @@ public class ConsoleGUI : MonoBehaviour {
     }
 
 
+}
+
+
+
+public class Note {
+    public string note;
+    public System.DateTime timeOfEntry;
+    private ConsoleGUI console;
+
+    public Note( string note, ConsoleGUI console ) {
+        this.note = note;
+        this.console = console;
+        timeOfEntry = System.DateTime.Now;
+    }
+
+    public void output() {
+        console.addOutputWithSpacing( console.formatStr( timeOfEntry.ToString( ( "yyyy-MM-dd HH:mm:ss" ) ), ConsoleGUI.strFormat.HEADLINE ) );
+        console.addOutput( note );
+    }
 }

@@ -35,15 +35,20 @@ public class Command {
     public bool requiresConnection = false;
     public bool requiresTarget = false;
     private ConsoleGUI parent;
+    public ConsoleGUI.baseCommandCategories commandCategory;
 
-    public Command( string name, string[] aliases, string description, ConsoleGUI parent, CoreFunction functionOrNull, string[] coreFunctionParameterNames ) {
+    public Command( string name, string[] aliases, string description, ConsoleGUI parent, CoreFunction functionOrNull, string[] coreFunctionParameterNames, ConsoleGUI.baseCommandCategories commandCategory ) {
         this.name = name;
+        if ( aliases == null ) {
+            aliases = new string[] { };
+        }
         this.aliases = aliases;
         this.description = description;
         this.coreFunction = functionOrNull;
         this.subCommands = new List<Command>();
         this.parent = parent;
         this.coreFunctionParameterNames = coreFunctionParameterNames;
+        this.commandCategory = commandCategory;
     }
 
     public void process( CommandInput input ) {
