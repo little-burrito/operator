@@ -56,24 +56,37 @@ public class Agent : MonoBehaviour {
         addOutput( "I need you to open this door." );
         yield return new WaitForSeconds( 2.0f * mainConsole.timeScale );
         addOutput( "Turn off the proximity sensor and you should be able to open it by activating the opening mechanism." );
+        // Add objective
+        MissionObjective objective = new MissionObjective( "Open the door", "The door needs to be opened remotely. Target the door by entering " + mainConsole.formatCmd( "target", new string[] { }, "target id" ) + ". Once you have a target selected, enter " + mainConsole.formatCmd( "scan" ) + " to see available systems. You can " + mainConsole.formatCmd( "enable" ) + " and " + mainConsole.formatCmd( "disable" ) + " systems by entering " + mainConsole.formatCmd( "enable", new string[] {}, "system id" ) + " or " + mainConsole.formatCmd( "disable", new string[] {}, "system id" ) + ".", 2, () => {
+            GameObject[] interactables = GameObject.FindGameObjectsWithTag( "Interactable" );
+            foreach ( GameObject other in interactables ) {
+                Interactable interactable = other.GetComponent<Interactable>();
+                if ( interactable.id == 1 ) {
+                    foreach ( InteractableSystem isystem in interactable.systems ) {
+                        if ( isystem.id == InteractableSystemType.DOOR_OPENING_MECHANISM ) {
+                            if ( isystem.enabled ) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            return false;
+        }, () => {
+        } );
+        StartCoroutine( mainConsole.addMissionObjective( mission, objective ) );
     }
 
     private void testWaypoint() {
         GameObject[] interactables = GameObject.FindGameObjectsWithTag( "Interactable" );
-        Debug.Log( interactables );
         switch ( waypoint ) {
             case 0: {
                 foreach ( GameObject other in interactables ) {
                     Interactable interactable = other.GetComponent<Interactable>();
-                    Debug.Log( interactable );
                     if ( interactable.id == 1 ) {
-                        Debug.Log( "1" );
                         foreach ( InteractableSystem isystem in interactable.systems ) {
-                            Debug.Log( "2" );
                             if ( isystem.id == InteractableSystemType.DOOR_OPENING_MECHANISM ) {
-                                Debug.Log( "3" );
                                 if ( isystem.enabled ) {
-                                    Debug.Log( "4" );
                                     waypoint++;
                                     StartCoroutine( secondDialog() );
                                 }

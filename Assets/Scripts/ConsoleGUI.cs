@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 public class ConsoleGUI : MonoBehaviour {
 
-    private List<Command> commandHistory;
+    private List<CommandInput> commandHistory;
     private List<string> outputHistory;
     private string currentInput;
     private string currentInputBackup;
@@ -42,7 +42,12 @@ public class ConsoleGUI : MonoBehaviour {
     public int currentAgentId = 0;
     public Mission currentMission;
 
-    private Interactable target = null;
+    public Interactable target = null;
+
+    public Command helpCommand;
+    private List<Command> commands;
+
+    private bool canAddMissionObjectives = true;
 
     ////////////////////////////////////////
     //
@@ -50,9 +55,9 @@ public class ConsoleGUI : MonoBehaviour {
     //
     ////////////////////////////////////////
 	// Use this for initialization
-	void Start () {
+    void Start() {
         //Random.seed = ( int )System.DateTime.Now.Ticks + this.GetInstanceID();
-        commandHistory = new List<Command>();
+        commandHistory = new List<CommandInput>();
         outputHistory = new List<string>();
         missions = new List<Mission>();
         currentInput = currentInputBackup = "";
@@ -64,7 +69,9 @@ public class ConsoleGUI : MonoBehaviour {
         Invoke( "blinkCursor", cursorBlinkTime );
         Invoke( "showNextLine", lineAddTime );
         Invoke( "testMissionCompletion", missionCompletionTestInterval );
-	}
+        currentMission = new Mission( "", "", -1, 0, "" );
+    }
+	
 
     public static ConsoleGUI instance {
         get {
@@ -92,7 +99,546 @@ public class ConsoleGUI : MonoBehaviour {
                 Destroy( this.gameObject );
             }
         }
+
+        //////////////////
+        // COMMANDS
+        //////////////////
+        helpCommand = new Command( "-help", new string[] { "-?", "/?", "-h", "/h", "/help" }, "Displays this help file.", this, ( CommandInput input ) => {
+            /*CommandInput newInput = input;
+            newInput.fullCommandString = newInput.fullCommandString.Replace( " -help", "" );
+            newInput.fullCommandString = newInput.fullCommandString.Replace( " -?", "" );
+            newInput.fullCommandString = newInput.fullCommandString.Replace( " /?", "" );
+            newInput.fullCommandString = newInput.fullCommandString.Replace( " -h", "" );
+            newInput.fullCommandString = newInput.fullCommandString.Replace( " /h", "" );
+            newInput.fullCommandString = newInput.fullCommandString.Replace( " /help", "" );
+            string[] separators = new string[] { " " };
+            string[] splitString = newInput.fullCommandString.Split( separators, System.StringSplitOptions.RemoveEmptyEntries );
+            newInput.commandName = splitString[ splitString.Length - 1 ];
+            newInput.parentCommandsString = newInput.parentCommandsString.Replace( formatStr( newInput.commandName, strFormat.SUB_COMMAND ) + " ", "" );
+            /*newInput.parentCommandsString = newInput.parentCommandsString.Replace( formatStr( "-help", strFormat.SUB_COMMAND ) + " ", "" );
+            newInput.parentCommandsString = newInput.parentCommandsString.Replace( formatStr( "-?", strFormat.SUB_COMMAND ) + " ", "" );
+            newInput.parentCommandsString = newInput.parentCommandsString.Replace( formatStr( "/?", strFormat.SUB_COMMAND ) + " ", "" );
+            newInput.parentCommandsString = newInput.parentCommandsString.Replace( formatStr( "-h", strFormat.SUB_COMMAND ) + " ", "" );
+            newInput.parentCommandsString = newInput.parentCommandsString.Replace( formatStr( "/h", strFormat.SUB_COMMAND ) + " ", "" );
+            newInput.parentCommandsString = newInput.parentCommandsString.Replace( formatStr( "/help", strFormat.SUB_COMMAND ) + " ", "" );*/
+            //outputHelpForInput( newInput );
+            outputHelpForInput( input );
+        }, new string[] { } );
+        helpCommand.requiresLogin = false;
+        helpCommand.requiresConnection = false;
+        helpCommand.requiresTarget = false;
+        commands = new List<Command>();
+
+        // Setup
+        Command cmd;
+        Command subCmd;
+        Command subSubCmd;
+        Command subSubSubCmd;
+
+        // Echo
+        cmd = new Command( "echo", new string[] { "ec" }, "Outputs text to the console.", this, ( CommandInput input ) => {
+            if ( input.fullCommandString.Length > input.commandName.Length ) {
+                addOutput( input.fullCommandString.Substring( input.commandName.Length + 1 ) );
+            } else {
+                outputHelpForInput( input );
+            }
+        }, new string[] { "text to output" } );
+        cmd.requiresLogin = false;
+        commands.Add( cmd );
+
+        // Help
+        cmd = new Command( "help", new string[] { "h", "?" }, "Displays a full list of available commands.", this, ( CommandInput input ) => {
+            if ( input.parameters.Count > 0 ) {
+                Command c = getBaseCommandFromString( input.parameters[ 0 ] );
+                if ( c != null ) {
+                    outputHelpForCommand( c );
+                    return;
+                }
+            }
+            outputHelpFile();
+        }, null );
+        cmd.requiresLogin = false;
+        commands.Add( cmd );
+
+        // Target
+        cmd = new Command( "target", new string[] { "targ", "select", "sel" }, "Targets the object with the specified id.", this, ( CommandInput input ) => {
+            if ( input.parameters.Count == 1 ) {
+                GameObject[] objects = GameObject.FindGameObjectsWithTag( "Interactable" );
+                Interactable interactable = null;
+                foreach ( GameObject obj in objects ) {
+                    Interactable currentInteractable = obj.GetComponent<Interactable>();
+                    if ( currentInteractable != null ) {
+                        if ( currentInteractable.displayName.ToLower() == input.parameters[ 0 ] ) {
+                            interactable = currentInteractable;
+                            break;
+                        }
+                    }
+                }
+                if ( interactable != null ) {
+                    StartCoroutine( cutsceneSelectTarget( interactable ) );
+                } else {
+                    addOutput( "Target not found: " + formatStr( input.parameters[ 0 ], strFormat.PARAMETER_IN_INSTRUCTION ) );
+                }
+            } else {
+                outputHelpForInput( input );
+            }
+        }, new string[] { "target id" } );
+        cmd.requiresConnection = true;
+        cmd.requiresTarget = false;
+        {
+            subCmd = new Command( "deselect", new string[] { "des", "-d", "/d", "d" }, "Deselects the current target.", this, ( CommandInput input ) => {
+                StartCoroutine( cutsceneDeselectTarget() );
+            }, new string[] { } );
+            subCmd.requiresTarget = true;
+            cmd.subCommands.Add( subCmd );
+        }
+        commands.Add( cmd );
+
+        // Restart
+        cmd = new Command( "restart", new string[] { }, "Restarts the game.", this, ( CommandInput input ) => {
+            if ( input.parameters.Count == 1 ) {
+                if ( input.parameters[ 0 ] == "-y" ) {
+                    Application.LoadLevel( 0 );
+                    Destroy( this );
+                } else {
+                    outputHelpForInput( input );
+                }
+            } else {
+                outputHelpForInput( input );
+            }
+        }, new string[] { "-y" } );
+        cmd.requiresLogin = false;
+        commands.Add( cmd );
+
+        // Connect
+        cmd = new Command( "connect", new string[] { "conn" }, "Connects to an agent.", this, null, null );
+        subCmd = new Command( "agent", new string[] { "a" }, "Connects to the agent with the specified id.", this, ( CommandInput input ) => {
+            if ( input.parameters.Count == 1 ) {
+                bool found = false;
+                int agentId;
+                if ( int.TryParse( input.parameters[ 0 ], out agentId ) ) {
+                    Mission mission = null;
+                    foreach ( Mission m in missions ) {
+                        if ( m.agentId == agentId ) {
+                            mission = m;
+                            if ( m.accepted && !m.completed ) {
+                                StartCoroutine( cutsceneConnect( mission, agentId ) );
+                                found = true;
+                            }
+                            break;
+                        }
+                    }
+                    if ( !found ) {
+                        if ( mission == null ) {
+                            addOutput( "Unable to find agent " + formatStr( "#" + input.parameters[ 0 ], strFormat.PARAMETER_IN_INSTRUCTION ) );
+                        } else {
+                            if ( !mission.accepted ) {
+                                addOutput( "Mission " + formatStr( "#" + mission.id, strFormat.PARAMETER_IN_INSTRUCTION ) + " is not accepted. To connect to this agent you must first " + formatCmd( "accept", new string[] { "mission", "" + mission.id } ) + "." );
+                           } else if ( mission.completed ) {
+                               addOutput( "Connection request denied. The mission is already completed." );
+                           }
+                        }
+                    }
+                } else {
+                    addOutput( "" + input.parameters[ 0 ] + " is not a valid agent id." );
+                }
+            } else {
+                outputHelpForInput( input );
+            }
+        }, new string[] { "agent id" } );
+        cmd.subCommands.Add( subCmd );
+        commands.Add( cmd );
+
+        // Disconnect
+        cmd = new Command( "disconnect", new string[] { "disc" }, "Disconnects from an agent.", this, ( CommandInput input ) => {
+            if ( input.parameters.Count == 1 ) {
+                if ( input.parameters[ 0 ] == "-y" ) {
+                    StartCoroutine( cutsceneDisconnect() );
+                } else {
+                    outputHelpForInput( input );
+                }
+            } else {
+                outputHelpForInput( input );
+            }
+        }, new string[] { "-y" } );
+        cmd.requiresConnection = true;
+        commands.Add( cmd );
+
+        // Log in
+        cmd = new Command( "login", new string[] { "logon" }, "Logs you in.", this, ( CommandInput input ) => {
+            StartCoroutine( displayWelcomeMessage() );
+        }, new string[] { } );
+        cmd.requiresLogin = false;
+        commands.Add( cmd );
+
+        // Log out
+        cmd = new Command( "logout", new string[] { "logoff" }, "Logs you out.", this, ( CommandInput input ) => {
+            StartCoroutine( cutsceneLogout() );
+        }, new string[] { } );
+        cmd.requiresLogin = true;
+        commands.Add( cmd );
+
+        // Watch
+        cmd = new Command( "watch", new string[] { }, "Gives live feedback from a targeted system.", this, ( CommandInput input ) => {
+            addOutput( "Not yet implemented" );
+        }, new string[] { "system id" } );
+        cmd.requiresConnection = true;
+        cmd.requiresTarget = true;
+        commands.Add( cmd );
+
+        // Clear
+        cmd = new Command( "clear", new string[] { "cls" }, "Clear the screen from text.", this, ( CommandInput input ) => {
+            outputHistory = new List<string>();
+        }, new string[] { "system id" } );
+        cmd.requiresLogin = false;
+        commands.Add( cmd );
+
+        // List
+        cmd = new Command( "list", new string[] { "ls", "dir" }, "Displays a list of the selected content.", this, null, null );
+        // {
+            // List MissionList
+            subCmd = new Command( "missionlist", new string[] { "missionslist", "missions", "mlist", "ml" }, "Lists all missions.", this, ( CommandInput input ) => {
+                bool listNotEmpty = false;
+
+                // Not accepted mission
+                bool missionListed = false;
+                foreach ( Mission mission in missions ) {
+                    if ( !mission.accepted ) {
+                        if ( !missionListed ) {
+                            addOutput( formatStr( "PENDING MISSIONS", strFormat.HEADLINE ) );
+                            missionListed = true;
+                            listNotEmpty = true;
+                        }
+                        outputMissionInList( mission );
+                    }
+                }
+
+                // Active missions
+                missionListed = false;
+                foreach ( Mission mission in missions ) {
+                    if ( mission.accepted && !mission.completed ) {
+                        if ( !missionListed ) {
+                            addOutput( formatStr( "ACTIVE MISSIONS", strFormat.HEADLINE ) );
+                            missionListed = true;
+                            listNotEmpty = true;
+                        }
+                        outputMissionInList( mission );
+                    }
+                }
+
+                // Completed missions
+                missionListed = false;
+                foreach ( Mission mission in missions ) {
+                    if ( mission.completed ) {
+                        if ( !missionListed ) {
+                            addOutput( formatStr( "COMPLETED MISSIONS", strFormat.HEADLINE ) );
+                            missionListed = true;
+                            listNotEmpty = true;
+                        }
+                        outputMissionInList( mission );
+                    }
+                }
+
+                if ( !listNotEmpty ) {
+                    addOutput( "Your mission list is empty" );
+                }
+            }, new string[] { } );
+            cmd.subCommands.Add( subCmd );
+
+            // List Mission
+            subCmd = new Command( "mission", new string[] { "m" }, "Lists details for the selected mission.", this, ( CommandInput input ) => {
+                if ( input.parameters.Count == 1  || ( input.parameters.Count == 0 && currentMission.accepted ) ) {
+                    if ( input.parameters.Count == 0 && currentMission.accepted ) {
+                        // Do current mission
+                        input.parameters.Add( "" + currentMission.id );
+                    }
+
+                    int missionId;
+                    if ( int.TryParse( input.parameters[ 0 ], out missionId ) ) {
+                        bool missionListed = false;
+                        foreach ( Mission m in missions ) {
+                            if ( m.id == missionId ) {
+                                outputMission( m );
+                                missionListed = true;
+                                break;
+                            }
+                        }
+                        if ( !missionListed ) {
+                            addOutput( "Unable to select mission " + formatStr( "" + missionId, strFormat.ID ) + ". Enter " + formatCmd( "list", "missionlist" ) + " to see available missions." );
+                        }
+                    } else {
+                        outputHelpForInput( input );
+                    }
+                } else {
+                    outputHelpForInput( input );
+                }
+            }, new string[] { "mission id" } );
+            cmd.subCommands.Add( subCmd );
+
+            // List Agents
+            subCmd = new Command( "agents", new string[] { "a" }, "Lists available agents.", this, ( CommandInput input ) => {
+                bool listNotEmpty = false;
+                bool didOutput = false;
+                foreach ( Mission m in missions ) {
+                    if ( m.accepted && !m.completed ) {
+                        if ( !didOutput ) {
+                            addOutput( formatStr( "AVAILABLE AGENTS (ACTIVE MISSIONS):", strFormat.HEADLINE ) );
+                            didOutput = true;
+                            listNotEmpty = true;
+                        }
+                        addOutput( "Agent " + formatStr( "#" + m.agentId, strFormat.ID ) + " for mission " + formatStr( "#" + m.id, strFormat.ID ) + ": " + m.title );
+                    }
+                }
+
+                didOutput = false;
+                foreach ( Mission m in missions ) {
+                    if ( !m.accepted ) {
+                        if ( !didOutput ) {
+                            addOutput( formatStr( "UNAVAILABLE AGENTS (PENDING MISSIONS):", strFormat.HEADLINE ) );
+                            didOutput = true;
+                            listNotEmpty = true;
+                        }
+                        addOutput( "Agent " + formatStr( "#" + m.agentId, strFormat.ID ) + " for mission " + formatStr( "#" + m.id, strFormat.ID ) + ": " + m.title );
+                        didOutput = true;
+                    }
+                }
+
+                if ( !listNotEmpty ) {
+                    addOutput( "Your agent list is empty" );
+                }
+            }, new string[] { } );
+            cmd.subCommands.Add( subCmd );
+        // }
+        commands.Add( cmd );
+
+        // Scan
+        cmd = new Command( "scan", new string[] { "sc" }, "Scans and outputs the systems of the current target", this, ( CommandInput input ) => {
+            StartCoroutine( cutsceneScan() );
+        }, new string[] { } );
+        cmd.requiresConnection = true;
+        cmd.requiresTarget = true;
+        commands.Add( cmd );
+
+        // Accept
+        cmd = new Command( "accept", new string[] { }, "Accepts a mission.", this, null, null );
+        {
+            // Mission
+            subCmd = new Command( "mission", new string[] { "m" }, "Accepts the selected mission.", this, ( CommandInput input ) => {
+                if ( input.parameters.Count == 1 ) {
+                    int missionId;
+                    if ( int.TryParse( input.parameters[ 0 ], out missionId ) ) {
+                        bool acceptedMission = false;
+                        foreach ( Mission m in missions ) {
+                            if ( m.id == missionId ) {
+                                m.accepted = true;
+                                addOutput( "Mission accepted" );
+                                acceptedMission = true;
+                                break;
+                            }
+                        }
+                        if ( !acceptedMission ) {
+                            addOutput( "Unable to accept mission " + formatStr( input.parameters[ 0 ], strFormat.PARAMETER_IN_INSTRUCTION ) + " - mission id not found. Enter " + formatCmd( "list", "missions" ) + " to see available missions and their ids." );
+                        }
+                    } else {
+                        addOutput( formatStr( input.parameters[ 0 ], strFormat.PARAMETER_IN_INSTRUCTION ) + " - is not a valid mission id. Enter " + formatCmd( "list", "missions" ) + " to see available missions and their ids." );
+                    }
+                } else {
+                    outputHelpForInput( input );
+                }
+            }, new string[] { "mission id" } );
+            cmd.subCommands.Add( subCmd );
+        }
+        commands.Add( cmd );
+
+        // Enable
+        cmd = new Command( "enable", new string[] { "en" }, "Enables the selected system on the current target.", this, ( CommandInput input ) => {
+            StartCoroutine( cutsceneEnable( input ) );
+        }, new string[] { "system id" } );
+        cmd.requiresConnection = true;
+        cmd.requiresTarget = true;
+        commands.Add( cmd );
+
+        // Disable
+        cmd = new Command( "disable", new string[] { "dis" }, "Disables the selected system on the current target.", this, ( CommandInput input ) => {
+            StartCoroutine( cutsceneDisable( input ) );
+        }, new string[] { "system id" } );
+        cmd.requiresConnection = true;
+        cmd.requiresTarget = true;
+        commands.Add( cmd );
+
+        // Options
+        cmd = new Command( "options", new string[] { "opt", "opts" }, "Displays and changes options.", this, null, null );
+        cmd.requiresLogin = false;
+        {
+            // Sound options
+            subCmd = new Command( "sound", new string[] { "snd" }, "Displays and changes sound options.", this, null, null );
+            subCmd.requiresLogin = false;
+            {
+                // Linefeed sound options
+                subSubCmd = new Command( "linefeed", new string[] { "lf" }, "Displays whether linefeed sound is on or off", this, ( CommandInput input ) => {
+                    if ( input.parameters.Count <= 0 ) {
+                        addOutput( "Linefeed sound effect is " + ( lineFeedSoundEnabled ? "on" : "off" ) + "." );
+                    } else {
+                        outputHelpForInput( input );
+                    }
+                }, new string[] { } );
+                subSubCmd.requiresLogin = false;
+                {
+                    // Linefeed on
+                    subSubSubCmd = new Command( "on", new string[] { }, "Enables the linefeed sound effect.", this, ( CommandInput input ) => {
+                        lineFeedSoundEnabled = true;
+                        addOutput( "Linefeed sound effect enabled." );
+                    }, new string[] { } );
+                    subSubSubCmd.requiresLogin = false;
+                    subSubCmd.subCommands.Add( subSubSubCmd );
+
+                    // Linefeed off
+                    subSubSubCmd = new Command( "off", new string[] { }, "Disables the linefeed sound effect.", this, ( CommandInput input ) => {
+                        lineFeedSoundEnabled = false;
+                        addOutput( "Linefeed sound effect disabled." );
+                    }, new string[] { } );
+                    subSubSubCmd.requiresLogin = false;
+                    subSubCmd.subCommands.Add( subSubSubCmd );
+                }
+                subCmd.subCommands.Add( subSubCmd );
+            }
+            cmd.subCommands.Add( subCmd );
+
+            // Timescale options
+            subCmd = new Command( "timescale", new string[] { "ts" }, "Displays and changes the time scale multiplier. 1 is normal speed, 0 makes everything instant.", this, ( CommandInput input ) => {
+                if ( input.parameters.Count == 1 ) {
+                    float ts;
+                    if ( float.TryParse( input.parameters[ 0 ], out ts ) ) {
+                        timeScale = ts;
+                        addOutput( "Time scale is now " + timeScale );
+                    } else {
+                        addOutput( formatStr( input.parameters[ 0 ], strFormat.PARAMETER_IN_INSTRUCTION ) + " is not a number." );
+                    }
+                } else if ( input.parameters.Count == 0 ) {
+                    addOutput( "Time scale is " + timeScale );
+                } else {
+                    outputHelpForInput( input );
+                }
+            }, new string[] { "number" } );
+            subCmd.requiresLogin = false;
+            cmd.subCommands.Add( subCmd );
+        }
+        commands.Add( cmd );
+
+        // END OF COMMANDS
     }
+
+    // Connect cutscene
+    IEnumerator cutsceneConnect( Mission mission, int agentId )  {
+        addOutput( "Establishing connection..." );
+        yield return new WaitForSeconds( 2.0f * timeScale );
+        addOutput( "Connection established" );
+        yield return new WaitForSeconds( 0.5f * timeScale );
+        addOutput( "Loading stream..." );
+        yield return new WaitForSeconds( 0.5f * timeScale );
+        addOutput( "Stream loaded" );
+        currentMission = mission;
+        currentAgentId = agentId;
+        connected = true;
+        Application.LoadLevel( mission.scene );
+    }
+    
+    // Disconnect cutscene
+    IEnumerator cutsceneDisconnect() {
+        addOutput( "Closing connection..." );
+        yield return new WaitForSeconds( 1.0f * timeScale );
+        addOutput( "Connection succesfully closed" );
+        connected = false;
+        currentMission = new Mission( "", "", 0, 0, "" );
+        Application.LoadLevel( "main" );
+    }
+
+    // Log out cutscene
+    IEnumerator cutsceneLogout() {
+        if ( isLoggingIn ) {
+            StopCoroutine( displayWelcomeMessage() );
+        }
+        addOutput( "Logging out..." );
+        yield return new WaitForSeconds( 0.5f );
+        addOutput( "User successfully logged out" );
+        loggedIn = false;
+    }
+
+    // Select target cutscene
+    IEnumerator cutsceneSelectTarget( Interactable interactable ) {
+        addOutput( "Locking target..." );
+        yield return new WaitForSeconds( 1.0f * timeScale );
+        this.target = interactable;
+        addOutput( "Target " + target.displayName + " selected" );
+    }
+
+    // Deselect target cutscene
+    IEnumerator cutsceneDeselectTarget() {
+        if ( target != null ) {
+            addOutput( "Deselecting target..." );
+            yield return new WaitForSeconds( 0.5f * timeScale );
+            target = null;
+            addOutput( "No target selected" );
+        } else {
+            addOutput( "No target selected" );
+        }
+    }
+
+    // Scan cutscene
+    IEnumerator cutsceneScan() {
+        if ( target != null ) {
+            addOutput( "Scanning..." );
+            foreach ( InteractableSystem isystem in target.systems ) {
+                yield return new WaitForSeconds( 0.1f * Random.Range( 1, 3 ) * timeScale );
+                addOutput( isystem.displayName + " - id: " + isystem.name + " - " + ( isystem.enabled ? "ENABLED" : "DISABLED" ) );
+            }
+        } else {
+            addOutput( "No target selected" );
+        }
+    }
+
+    // Enable cutscene
+    IEnumerator cutsceneEnable( CommandInput input ) {
+        if ( input.parameters.Count == 1 ) {
+            bool found = false;
+            foreach ( InteractableSystem isystem in target.systems ) {
+                if ( isystem.name.ToLower() == input.parameters[ 0 ] ) {
+                    found = true;
+                    addOutput( "Enabling system..." );
+                    yield return new WaitForSeconds( 0.5f * timeScale );
+                    isystem.activate();
+                    addOutput( isystem.response );
+                }
+            }
+            if ( !found ) {
+                addOutput( "System " + input.parameters[ 0 ] + " not found" );
+            }
+        } else {
+            outputHelpForInput( input );
+        }
+    }
+
+    // Disable cutscene
+    IEnumerator cutsceneDisable( CommandInput input ) {
+        if ( input.parameters.Count == 1 ) {
+            bool found = false;
+            foreach ( InteractableSystem isystem in target.systems ) {
+                if ( isystem.name.ToLower() == input.parameters[ 0 ] ) {
+                    found = true;
+                    addOutput( "Disabling system..." );
+                    yield return new WaitForSeconds( 0.5f * timeScale );
+                    isystem.deactivate();
+                    addOutput( isystem.response );
+                }
+            }
+            if ( !found ) {
+                addOutput( "System " + input.parameters[ 0 ] + " not found" );
+            }
+        } else {
+            outputHelpForInput( input );
+        }
+    }
+
 
     ////////////////////////////////////////
     //
@@ -118,30 +664,14 @@ public class ConsoleGUI : MonoBehaviour {
         loggedIn = true;
         isLoggingIn = false;
         yield return new WaitForSeconds( 1.0f * timeScale );
-        addOutput( "Enter help to load the help file" );
+        addOutput( "Enter " + formatCmd( "help" ) + " to load the help file" );
         yield return new WaitForSeconds( 3.0f * timeScale );
         int missionId = generateNewMissionId();
         int agentId = generateNewAgentId();
-        Mission mission = new Mission( "Seize launch codes", "Agent #" + agentId + " is in need of assistance. You need to connect to the agent and retrieve the launch codes. Connect to agent #" + agentId + " by entering connect agent " + agentId + " and take control of the situation.", missionId, agentId, "level1" );
-        mission.addObjective( new MissionObjective( "Connect to the agent", "Connect to the agent by entering connect agent " + agentId, 1, () => {
+        Mission mission = new Mission( "Seize launch codes", "Agent " + formatStr( "#" + agentId, strFormat.ID ) + " is in need of assistance. You need to connect to the agent and retrieve the launch codes. Connect to agent " + formatStr( "#" + agentId, strFormat.ID ) + " by entering " + formatCmd( "connect", new string[] { "agent", "" + agentId } ) + " and take control of the situation.", missionId, agentId, "level1" );
+        mission.addObjective( new MissionObjective( "Connect to the agent", "Connect to the agent by entering " + formatCmd( "connect", new string[] { "agent", "" + agentId } ), 1, () => {
             if ( Application.loadedLevelName == mission.scene ) {
                 return true;
-            }
-            return false;
-        }, () => { } ) );
-        mission.addObjective( new MissionObjective( "Open the door", "The door needs to be opened remotely. Target the door by entering target <target id>. Once you have a target selected, enter scan to see available systems. You can enable and disable systems by entering enable <system id> or disable <system id>.", 2, () => {
-            GameObject[] interactables = GameObject.FindGameObjectsWithTag( "Interactable" );
-            foreach ( GameObject other in interactables ) {
-                Interactable interactable = other.GetComponent<Interactable>();
-                if ( interactable.id == 1 ) {
-                    foreach ( InteractableSystem isystem in interactable.systems ) {
-                        if ( isystem.id == InteractableSystemType.DOOR_OPENING_MECHANISM ) {
-                            if ( isystem.enabled ) {
-                                return true;
-                            }
-                        }
-                    }
-                }
             }
             return false;
         }, () => {
@@ -212,7 +742,7 @@ public class ConsoleGUI : MonoBehaviour {
 	void Update () {
         // Debug fix
         if ( commandHistory == null ) {
-            commandHistory = new List<Command>();
+            commandHistory = new List<CommandInput>();
         }
 
 	    // Process input
@@ -252,7 +782,7 @@ public class ConsoleGUI : MonoBehaviour {
             } else if ( c == "\n"[ 0 ] || c == "\r"[ 0 ] ) {
                 // Enter
                 if ( currentInput.Length > 0 ) {
-                    Command command = new Command( currentInput );
+                    CommandInput command = new CommandInput( currentInput );
                     execute( command );
                 }
                 resetCursorBlink();
@@ -419,7 +949,7 @@ public class ConsoleGUI : MonoBehaviour {
         currentInput = buffer.Substring( 0, currentMarkerPosition );
         currentInput += c;
         currentMarkerPosition++;
-        if ( currentMarkerPosition < buffer.Length ) {
+        if ( currentMarkerPosition <= buffer.Length ) {
             currentInput += buffer.Substring( currentMarkerPosition - 1, buffer.Length - currentMarkerPosition + 1 );
         }
         resetCursorBlink();
@@ -467,7 +997,7 @@ public class ConsoleGUI : MonoBehaviour {
         }
     }
 
-    void execute( Command command ) {
+    void execute( CommandInput command ) {
         commandHistory.Insert( 0, command );
         addOutput( "" );
         addOutput( "> " + command.fullCommandString );
@@ -482,63 +1012,71 @@ public class ConsoleGUI : MonoBehaviour {
     // COMMAND DELEGATION
     //
     ////////////////////////////////////////
-    void runCommand( Command cmd ) {
-        if ( loggedIn ) {
-            switch ( cmd.command ) {
+    void runCommand( CommandInput input ) {
+        foreach ( Command cmd in commands ) {
+            if ( cmd.matchesInputCommandWithCommandInput( input ) ) {
+                cmd.process( input );
+                return;
+            }
+        }
+        outputInvalidCommand( input );
+
+        /*if ( loggedIn ) {
+            switch ( input.commandName ) {
                 case "target": {
-                        StartCoroutine( cmdTarget( cmd ) );
+                        StartCoroutine( cmdTarget( input ) );
                         break;
                     }
                 case "scan": {
-                        StartCoroutine( cmdScan( cmd ) );
+                        StartCoroutine( cmdScan( input ) );
                         break;
                     }
                 case "accept": {
-                        cmdAccept( cmd );
+                        cmdAccept( input );
                         break;
                     }
                 case "en":
                 case "enable": {
-                        StartCoroutine( cmdEnable( cmd ) );
+                        StartCoroutine( cmdEnable( input ) );
                         break;
                     }
                 case "dis":
                 case "disable": {
-                        StartCoroutine( cmdDisable( cmd ) );
+                        StartCoroutine( cmdDisable( input ) );
                         break;
                     }
                 case "conn":
                 case "connect": {
-                        StartCoroutine( cmdConnect( cmd ) );
+                        StartCoroutine( cmdConnect( input ) );
                         break;
                     }
                 case "disc":
                 case "disconnect": {
-                        StartCoroutine( cmdDisconnect( cmd ) );
+                        StartCoroutine( cmdDisconnect( input ) );
                         break;
                     }
                 case "options":
                 case "opt": {
-                    cmdOptions( cmd );
-                    break;
+                        cmdOptions( input );
+                        break;
                     }
                 case "login":
                 case "logon": {
-                    addOutput( "You are already logged in." );
-                    break;
+                        addOutput( "You are already logged in." );
+                        break;
                     }
                 case "logout":
                 case "logoff": {
-                    if ( connected ) {
-                        execute( new Command( "disconnect -y" ) );
-                    }
-                        StartCoroutine( cmdLogout( cmd ) );
+                        if ( connected ) {
+                            execute( new CommandInput( "disconnect -y" ) );
+                        }
+                        StartCoroutine( cmdLogout( input ) );
                         break;
                     }
                 case "list":
                 case "dir":
                 case "ls": {
-                        cmdList( cmd );
+                        cmdList( input );
                         break;
                     }
                 case "exit":
@@ -549,35 +1087,35 @@ public class ConsoleGUI : MonoBehaviour {
                 case "help":
                 case "?":
                 case "h": {
-                        outputHelpFile( cmd );
+                        outputHelpFile();
                         break;
                     }
                 case "restart":
                 case "r": {
-                        cmdRestart( cmd );
+                        cmdRestart( input );
                         break;
                     }
                 case "clear":
                 case "cls": {
-                        if ( cmd.parameters.Count == 0 ) {
+                        if ( input.parameters.Count == 0 ) {
                             outputHistory = new List<string>();
                         } else {
-                            outputInvalidFormat( cmd, "clear" );
+                            outputInvalidFormat( input, "clear" );
                         }
                         break;
                     }
                 default: {
-                        outputInvalidCommand( cmd );
+                        outputInvalidCommand( input );
                         break;
                     }
             }
         } else {
-            switch ( cmd.command ) {
+            switch ( input.commandName ) {
                 case "login":
                 case "logon": {
-                    cmdLogin( cmd );
-                    break;
-                }
+                        cmdLogin( input );
+                        break;
+                    }
                 case "quit":
                 case "exit": {
                         Application.Quit();
@@ -586,15 +1124,15 @@ public class ConsoleGUI : MonoBehaviour {
                     }
                 case "options":
                 case "opt": {
-                    cmdOptions( cmd );
-                    break;
+                        cmdOptions( input );
+                        break;
                     }
                 default: {
-                    addOutput( "You are not logged in. Log in using command: login" );
-                    break;
-                }
+                        addOutput( "You are not logged in. Log in using command: login" );
+                        break;
+                    }
             }
-        }
+        }*/
     }
 
     ////////////////////////////////////////
@@ -621,7 +1159,60 @@ public class ConsoleGUI : MonoBehaviour {
     // OUTPUT
     //
     ////////////////////////////////////////
-    void addOutput( string output ) {
+    // Formatting
+    public enum strFormat { BASE_COMMAND, ALIAS, SUB_COMMAND, CURRENT_SUB_COMMAND, DESCRIPTION, PARAMETER_NAME, PARAMETER_IN_INSTRUCTION, HEADLINE, ID };
+    public string formatStr( string str, strFormat format ) {
+        switch ( format ) {
+            case strFormat.BASE_COMMAND:
+            case strFormat.HEADLINE:
+                return "<b>" + str + "</b>";
+            case strFormat.SUB_COMMAND:
+            case strFormat.ALIAS:
+            case strFormat.ID:
+            case strFormat.PARAMETER_IN_INSTRUCTION:
+                return "<i>" + str + "</i>";
+            case strFormat.PARAMETER_NAME:
+                return "<" + str + ">";
+            default:
+                return str;
+        }
+    }
+    // Command formatting
+    public string formatCmd( string baseCommand ) {
+        return formatStr( baseCommand, strFormat.BASE_COMMAND );
+    }
+    public string formatCmd( string baseCommand, string[] subCommands ) {
+        string ret = formatCmd( baseCommand );
+        foreach ( string subCmd in subCommands ) {
+            ret += " ";
+            ret += formatStr( subCmd, strFormat.SUB_COMMAND );
+        }
+        return ret;
+    }
+    public string formatCmd( string baseCommand, string[] subCommands, string[] parameters ) {
+        string ret = formatCmd( baseCommand, subCommands );
+        foreach ( string parameter in parameters ) {
+            ret += " ";
+            ret += formatStr( formatStr( parameter, strFormat.PARAMETER_NAME ), strFormat.PARAMETER_IN_INSTRUCTION );
+        }
+        return ret;
+    }
+    // Command formatting aliases
+    public string formatCmd( string baseCommand, string subCommand ) {
+        return formatCmd( baseCommand, new string[] { subCommand } );
+    }
+    public string formatCmd( string baseCommand, string subCommand, string parameter ) {
+        return formatCmd( baseCommand, new string[] { subCommand }, new string[] { parameter } );
+    }
+    public string formatCmd( string baseCommand, string subCommand, string[] parameters ) {
+        return formatCmd( baseCommand, new string[] { subCommand }, parameters );
+    }
+    public string formatCmd( string baseCommand, string[] subCommands, string parameter ) {
+        return formatCmd( baseCommand, subCommands, new string[] { parameter } );
+    }
+
+    // Output
+    public void addOutput( string output ) {
         string[] lines = output.Split( new string[] { "\n" }, System.StringSplitOptions.None );
         // Only split the lines if we need to - this way we can keep track of
         // already visible lines and make things like progress bars.
@@ -635,34 +1226,278 @@ public class ConsoleGUI : MonoBehaviour {
             currentlyVisibleLine++;
         }
     }
-    void addOutputWithSpacing( string output ) {
+
+
+    public void addOutputWithSpacing( string output ) {
         addOutput( "" );
         addOutput( output );
     }
-    void outputInvalidFormat( Command cmd, string expectedFormat ) {
-        addOutput( "Command \"" + cmd.command + "\" invalid format. Expected:\n" + expectedFormat );
+
+
+    public void addOutputIfNotEmpty( string str ) {
+        string testStr = str.Replace( " ", "" );
+        if ( testStr != "" ) {
+            addOutput( str );
+        }
     }
-    void outputInvalidCommand( Command cmd ) {
-        addOutput( "ERROR: Unknown command \"" + cmd.command + "\"" );
+
+
+    // String constructing functions
+    public string getCommandAliases( Command cmd ) {
+        string aliases = "";
+        foreach ( string alias in cmd.aliases ) {
+            if ( aliases != "" ) {
+                aliases += ", ";
+            } else {
+                aliases += "Aliases: " + formatStr( cmd.name, strFormat.ALIAS ) + ", ";
+            }
+            aliases +=  formatStr( alias, strFormat.ALIAS );
+        }
+        return aliases;
     }
-    void outputHelp( Command cmd, string help ) {
-        addOutput( "Help file for command \"" + cmd.command + "\"\n" + help );
+
+    public string getSubCommandAliases( CommandInput input ) {
+        Command cmd = getCurrentCommandFromInput( input );
+        string aliases = "";
+        foreach ( string alias in cmd.aliases ) {
+            if ( aliases != "" ) {
+                aliases += ", ";
+            } else {
+                aliases += "Aliases: " + formatStr( cmd.name, strFormat.ALIAS ) + ", ";
+            }
+            aliases +=  formatStr( alias, strFormat.ALIAS );
+        }
+        return aliases;
     }
-    void outputCommandNotYetImplemented( Command cmd ) {
+
+
+    public string getCommandParameters( Command cmd ) {
+        string coreFunctionParameters = "";
+        if ( cmd.coreFunction != null ) {
+            foreach ( string param in cmd.coreFunctionParameterNames ) {
+                coreFunctionParameters += " " + formatStr( param, strFormat.PARAMETER_NAME );
+            }
+            coreFunctionParameters = formatStr( cmd.name, strFormat.BASE_COMMAND ) + coreFunctionParameters + " - " + formatStr( cmd.description, strFormat.DESCRIPTION );
+        }
+        return coreFunctionParameters;
+    }
+
+    public string getSubCommandParameters( CommandInput input ) {
+        Command cmd = getCurrentCommandFromInput( input );
+        string coreFunctionParameters = "";
+        if ( cmd.coreFunction != null ) {
+            foreach ( string param in cmd.coreFunctionParameterNames ) {
+                coreFunctionParameters += " " + formatStr( param, strFormat.PARAMETER_NAME );
+            }
+            coreFunctionParameters = input.parentCommandsString + formatStr( cmd.name, strFormat.CURRENT_SUB_COMMAND ) + coreFunctionParameters + " - " + formatStr( cmd.description, strFormat.DESCRIPTION );
+        }
+        return coreFunctionParameters;
+    }
+
+
+    public string getCommandSubCommands( Command cmd ) {
+        string subCommands = "";
+        bool first = true;
+        foreach ( Command subCommand in cmd.subCommands ) {
+            if ( !first ) {
+                subCommands += "\n";
+            }
+            subCommands += formatStr( cmd.name, strFormat.BASE_COMMAND ) + " " + formatStr( subCommand.name, strFormat.CURRENT_SUB_COMMAND ) + " - " + formatStr( subCommand.description, strFormat.DESCRIPTION );
+            first = false;
+        }
+        return subCommands;
+    }
+
+    public string getSubCommandSubCommands( CommandInput input ) {
+        Command cmd = getCurrentCommandFromInput( input );
+        string subCommands = "";
+        bool first = true;
+        foreach ( Command subCommand in cmd.subCommands ) {
+            if ( !first ) {
+                subCommands += "\n";
+            }
+            subCommands += input.parentCommandsString + formatStr( cmd.name, strFormat.CURRENT_SUB_COMMAND ) + " " + formatStr( subCommand.name, strFormat.CURRENT_SUB_COMMAND ) + " - " + formatStr( subCommand.description, strFormat.DESCRIPTION );
+            first = false;
+        }
+        return subCommands;
+    }
+
+    // Command tree for base command
+    public string getCommandTreeForBaseCommand( Command cmd ) {
+        CommandInput input = new CommandInput( cmd.name );
+        string cmdTree = "";
+        if ( cmd.coreFunction != null ) {
+            string coreFunctionParameters = "";
+            foreach ( string param in cmd.coreFunctionParameterNames ) {
+                coreFunctionParameters += " " + formatStr( param, strFormat.PARAMETER_NAME );
+            }
+            cmdTree += formatStr( cmd.name, strFormat.BASE_COMMAND ) + coreFunctionParameters + " - " + formatStr( cmd.description, strFormat.DESCRIPTION );
+        }
+        foreach ( Command subCmd in cmd.subCommands ) {
+            CommandInput newInput = new CommandInput( input.fullCommandString + " " + subCmd.name );
+            newInput = subCmd.reformatCommandInputForSubCommand( newInput );
+            cmdTree += getRecursiveSubCommandTreeFromBaseCommand( subCmd, newInput );
+        }
+        if ( cmdTree.StartsWith( "\n" ) ) {
+            cmdTree = cmdTree.Substring( 1 );
+        }
+        return cmdTree;
+    }
+    // Command tree generation recursive function
+    private string getRecursiveSubCommandTreeFromBaseCommand( Command cmd, CommandInput input ) {
+        string cmdTree = "";
+        if ( cmd.coreFunction != null ) {
+            string coreFunctionParameters = "";
+            foreach ( string param in cmd.coreFunctionParameterNames ) {
+                coreFunctionParameters += " " + formatStr( param, strFormat.PARAMETER_NAME );
+            }
+            cmdTree += "\n" + input.parentCommandsString + formatStr( cmd.name, strFormat.CURRENT_SUB_COMMAND ) + coreFunctionParameters + " - " + formatStr( cmd.description, strFormat.DESCRIPTION );
+        }
+        foreach ( Command subCmd in cmd.subCommands ) {
+            CommandInput newInput = new CommandInput( input.fullCommandString + " " + subCmd.name );
+            newInput.parentCommandsString = input.parentCommandsString;
+            newInput.commandName = cmd.name;
+            newInput = subCmd.reformatCommandInputForSubCommand( newInput );
+            cmdTree += getRecursiveSubCommandTreeFromBaseCommand( subCmd, newInput );
+        }
+        return cmdTree;
+    }
+
+    // Command tree for sub command
+    /*public string getCommandTreeForSubCommand( CommandInput input ) {
+        Command cmd = getCurrentCommandFromInput( input );
+        string cmdTree = "";
+        if ( cmd.coreFunction != null ) {
+            string coreFunctionParameters = "";
+            foreach ( string param in cmd.coreFunctionParameterNames ) {
+                coreFunctionParameters += " " + formatStr( param, strFormat.PARAMETER_NAME );
+            }
+            cmdTree += formatStr( cmd.name, strFormat.BASE_COMMAND ) + coreFunctionParameters + " - " + formatStr( cmd.description, strFormat.DESCRIPTION );
+        }
+        input.parameters.RemoveRange( 0, input.parameters.Count );
+        foreach ( Command subCmd in cmd.subCommands ) {
+            CommandInput newInput = new CommandInput( input.fullCommandString + " " + subCmd.name );
+            newInput = subCmd.reformatCommandInputForSubCommand( newInput );
+            cmdTree += getRecursiveSubCommandTreeFromSubCommand( subCmd, newInput );
+        }
+        if ( cmdTree.StartsWith( "\n" ) ) {
+            cmdTree = cmdTree.Substring( 1 );
+        }
+        return cmdTree;
+    }
+    // Command tree generation recursive function
+    private string getRecursiveSubCommandTreeFromSubCommand( Command cmd, CommandInput input ) {
+        string cmdTree = "";
+        if ( cmd.coreFunction != null ) {
+            string coreFunctionParameters = "";
+            foreach ( string param in cmd.coreFunctionParameterNames ) {
+                coreFunctionParameters += " " + formatStr( param, strFormat.PARAMETER_NAME );
+            }
+            cmdTree += "\n" + input.parentCommandsString + formatStr( cmd.name, strFormat.CURRENT_SUB_COMMAND ) + coreFunctionParameters + " - " + formatStr( cmd.description, strFormat.DESCRIPTION );
+        }
+        foreach ( Command subCmd in cmd.subCommands ) {
+            CommandInput newInput = new CommandInput( input.fullCommandString + " " + subCmd.name );
+            newInput.parentCommandsString = input.parentCommandsString;
+            newInput.commandName = subCmd.name;
+            newInput = subCmd.reformatCommandInputForSubCommand( newInput );
+            cmdTree += getRecursiveSubCommandTreeFromBaseCommand( subCmd, newInput );
+        }
+        return cmdTree;
+    }*/
+
+
+    // Output functions
+    public void outputInternalError( string message ) {
+        addOutput( "INTERNAL ERROR: " + message );
+    }
+    /*public void outputInvalidFormat( CommandInput cmd, string expectedFormat ) {
+        addOutput( "Command " + formatStr( cmd.commandName, strFormat.BASE_COMMAND ) + " invalid format. Expected:\n" + expectedFormat );
+    }*/
+    public void outputInvalidCommand( CommandInput input ) {
+        addOutput( "Unknown command " + formatCmd( input.commandName ) );
+        addOutput( "Enter " + formatCmd( "help" ) + " for a list of available commands" );
+    }
+    public void outputRequiresLogin( Command cmd ) {
+        addOutput( "Command " + formatCmd( cmd.name ) + " requires the user to be logged in." );
+        addOutput( "Enter " + formatCmd( "login" ) + " to log in." );
+    }
+    public void outputRequiresConnection( Command cmd ) {
+        addOutput( "Command " + formatCmd( cmd.name ) + " requires an active connection to an agent." );
+        addOutput( "Use the " + formatCmd( "connect" ) + " command to connect to an agent. Enter " + formatCmd( "connect", "-help" ) + " for more information." );
+    }
+    public void outputRequiresTarget( Command cmd ) {
+        addOutput( "Command " + formatCmd( cmd.name ) + " requires the user to be logged in." );
+        addOutput( "Use the " + formatCmd( "target" ) + " command to target an object. Enter " + formatCmd( "target", "-help" ) + " for more information." );
+    }
+    /*public void outputExpectedFormat( Command cmd, CommandInput input ) {
+        addOutput( "Unexpected format: " + input.fullCommandString );
+        addOutput( "Possible formats:" );
+        if ( cmd.coreFunction != null ) {
+            string coreFunctionParameters = "";
+            foreach ( string param in cmd.coreFunctionParameterNames ) {
+                coreFunctionParameters += formatStr( param, strFormat.PARAMETER_NAME );
+            }
+            addOutput( input.parentCommandsString + formatStr( cmd.name, strFormat.CURRENT_SUB_COMMAND ) + " - " + formatStr( cmd.description, strFormat.DESCRIPTION ) );
+        }
+        foreach ( Command subCommand in cmd.subCommands ) {
+            addOutput( input.parentCommandsString + formatStr( cmd.name, strFormat.CURRENT_SUB_COMMAND ) + " " + formatStr( subCommand.name, strFormat.BASE_COMMAND ) + " - " + formatStr( subCommand.description, strFormat.DESCRIPTION ) );
+        }
+    }*/
+    public void outputHelpForInput( CommandInput input ) {
+        if ( input.baseCommandName == input.commandName ) { // Base command
+            outputHelpForCommand( getBaseCommandFromInput( input ) );
+        } else {
+            outputHelpForSubCommand( input );
+        }
+    }
+    public void outputHelpForCommand( Command cmd ) {
+        addOutput( "=== HELP FILE FOR " + formatCmd( cmd.name ) );
+        addOutputIfNotEmpty( getCommandAliases( cmd ) );
+        addOutputIfNotEmpty( cmd.description );
+        addOutputIfNotEmpty( getCommandTreeForBaseCommand( cmd ) );
+        //addOutputIfNotEmpty( getCommandParameters( cmd ) );
+        //addOutputIfNotEmpty( getCommandSubCommands( cmd ) );
+    }
+    public void outputHelpForSubCommand( CommandInput input ) {
+        //Command cmd = getCurrentCommandFromInput( input );
+        //Command baseCmd = getBaseCommandFromInput( input );
+        Command cmd = getBaseCommandFromInput( input );
+        addOutput( "=== HELP FILE FOR " + formatCmd( cmd.name ) );
+        addOutputIfNotEmpty( getCommandAliases( cmd ) );
+        addOutputIfNotEmpty( cmd.description );
+        addOutputIfNotEmpty( getCommandTreeForBaseCommand( cmd ) );
+        //addOutput( "=== HELP FILE FOR " + input.parentCommandsString + formatStr( cmd.name, strFormat.CURRENT_SUB_COMMAND ) );
+        //addOutputIfNotEmpty( cmd.description );
+        //addOutputIfNotEmpty( getSubCommandAliases( input ) );
+        //string[] separators = new string[] { "\n" };
+        //string[] lines = getCommandTreeForBaseCommand( baseCmd ).Split( separators, System.StringSplitOptions.None );
+        //string output = "";
+        //foreach ( string line in lines ) {
+            //if ( line.Contains( input.parentCommandsString ) ) {
+                //output += line + "\n";
+            //}
+        //}
+        //addOutputIfNotEmpty( output );
+        //addOutputIfNotEmpty( getCommandTreeForBaseCommand( baseCmd ) );
+        //addOutputIfNotEmpty( getSubCommandParameters( input ) );
+        //addOutputIfNotEmpty( getSubCommandSubCommands( input ) );
+    }
+    /*public void outputHelpOld( CommandInput cmd, string help ) {
+        addOutput( "Help file for command " + formatStr( cmd.commandName, strFormat.BASE_COMMAND ) + "\n" + help );
+    }
+    public void outputCommandNotYetImplemented( CommandInput cmd ) {
         addOutput( "This command has not yet been implemented." );
-    }
-    void outputHelpFile( Command cmd ) {
+    }*/
+    public void outputHelpFile( ) {
         addOutput( "=== HELP FILE ===" );
-        addOutput( "" );
-        addOutput( "General instructions:" );
-        addOutput( "You control everything using your console. If" );
-        addOutput( "you want more information about a specific" );
-        addOutput( "command, or a shorthand for it's parameters," );
-        addOutput( "you can enter <command> -help" );
-        addOutput( "" );
-        addOutput( "List of available commands:" );
-        addOutput( "" );
-        addOutput( "Starting and ending" );
+        addOutput( formatStr( "General instructions:", strFormat.HEADLINE ) );
+        addOutput( "You control everything using your console." );
+        addOutput( "If you want more information about a specific command, or a shorthand for its parameters, you can enter " + formatCmd( "<command>", "-help" ) );
+        addOutput( formatStr( "List of available commands:", strFormat.HEADLINE ) );
+        foreach ( Command cmd in commands ) {
+            addOutput( formatCmd( cmd.name ) + " - " + formatStr( cmd.description, strFormat.DESCRIPTION ) );
+        }
+        /*addOutput( "Starting and ending" );
         addOutput( " connect (conn) - connects to an agent" );
         addOutput( " disconnect (disc) - disconnects from an agent" );
         addOutput( "Actions" );
@@ -678,9 +1513,9 @@ public class ConsoleGUI : MonoBehaviour {
         addOutput( " options (opt) - edit options" );
         addOutput( " login - logs you in" );
         addOutput( " logout - logs you out" );
-        addOutput( " restart (r) - restart the game" );
+        addOutput( " restart (r) - restart the game" );*/
         addOutput( "" );
-        addOutput( "To view currently available missions, enter list missions" );
+        addOutput( "To view currently available missions, enter " + formatCmd( "list", "missions" ) );
     }
 
     ////////////////////////////////////////
@@ -740,31 +1575,37 @@ public class ConsoleGUI : MonoBehaviour {
     ////////////////////////////////////////
     public void addMission( Mission mission ) {
         missions.Add( mission );
-        addOutputWithSpacing( "*** New mission received - #" + mission.id + ": " + mission.title + "\nEnter list mission " + mission.id + " for more info" );
+        addOutputWithSpacing( "*** New mission received - " + formatStr( "#" + mission.id, strFormat.ID ) + ": " + mission.title + "\nEnter " + formatCmd( "list", new string[] { "mission", "" + mission.id } ) + " for more info" );
     }
-    public void addMissionObjective( Mission mission, MissionObjective objective ) {
-        foreach ( Mission m in missions ) {
-            if ( m.id == mission.id ) {
-                m.addObjective( objective );
-                addOutputWithSpacing( "*** New objective received: " + objective.title + "\nEnter list mission " + m.id + " for more details." );
-                break;
+    public IEnumerator addMissionObjective( Mission mission, MissionObjective objective ) {
+        if ( canAddMissionObjectives ) {
+            foreach ( Mission m in missions ) {
+                if ( m.id == mission.id ) {
+                    m.addObjective( objective );
+                    addOutputWithSpacing( "*** New objective received: " + objective.title + "\nEnter " + formatCmd( "list", new string[] { "mission", "" + m.id } ) + " for more details." );
+                    break;
+                }
             }
+        } else {
+            yield return new WaitForSeconds( 1.0f );
+            StartCoroutine( addMissionObjective( mission, objective ) );
         }
     }
     void outputMissionComplete( Mission m ) {
-        addOutputWithSpacing( "Mission completed. #" + m.id + ": " + m.title
+        addOutputWithSpacing( "Mission completed. " + formatStr( "#" + m.id, strFormat.ID ) + ": " + m.title
                             + "\nEnter disconnect -y to give control back to the agent and return to the lobby." );
     }
     void outputObjectiveComplete( Mission m, MissionObjective o ) {
-        addOutputWithSpacing( "Objective " + o.title + " completed. Enter list mission " + m.id + " for a list of objectives" );
+        addOutputWithSpacing( "Objective " + o.title + " completed. Enter " + formatCmd( "list", new string[] { "mission", "" + m.id } ) + " for a list of objectives" );
         o.runCompletionFunction();
     }
     void outputMissionInList( Mission m ) {
-        addOutput( "#" + m.id + ": " + m.title + ( m.accepted ? " - Agent #" + m.agentId : " - Enter accept mission " + m.id + " to accept or list mission " + m.id + " for more information." ) );
+        addOutput( "Mission " + formatStr( "#" + m.id, strFormat.ID ) + ": " + m.title + ( m.accepted ? " - Agent " + formatStr( "#" + m.agentId, strFormat.ID ) : " - Enter " + formatCmd( "accept", new string[] { "mission", "" + m.id } ) + " to accept or " + formatCmd( "list", new string[] { "mission", "" + m.id } ) + " for more information." ) );
             //+ "\nAccepted: [" + ( m.accepted ? "X" : " " ) + "]" 
             //+ " Completed: [" + ( m.completed ? "X" : " " ) + "]" );
     }
     void outputMission( Mission m ) {
+        addOutput( "========================================" );
         string status;
         if ( m.completed ) {
             status = "COMPLETED";
@@ -773,14 +1614,14 @@ public class ConsoleGUI : MonoBehaviour {
         } else {
             status = "PENDING ACCEPTANCE";
         }
-        addOutput( "MISSION #" + m.id + " - " + m.title
-            + ( m.accepted ? "" : "\nEnter accept mission " + m.id + " to accept." ) 
+        addOutput( formatStr( "MISSION " + formatStr( "#" + m.id, strFormat.ID ) + " - " + m.title, strFormat.HEADLINE )
+            + ( m.accepted ? "" : "\nEnter " + formatCmd( "accept", new string[] { "mission", "" + m.id } ) + " to accept." ) 
             + "\nSTATUS: " + status
-            + "\nAGENT: #" + m.agentId
-            + "\n\n" + "MISSION BRIEFING"
+            + "\nAGENT: " + formatStr( "#" + m.agentId, strFormat.ID )
+            + "\n\n" + formatStr( "MISSION BRIEFING", strFormat.HEADLINE )
             //+ "\nAccepted: [" + ( m.accepted ? "X" : " " ) + "]"
             //+ " Completed: [" + ( m.completed ? "X" : " " ) + "]"
-            + "\n" + m.description + "\n\nOBJECTIVES" );
+            + "\n" + m.description + "\n\n" + formatStr( "OBJECTIVES", strFormat.HEADLINE ) );
 
         bool first = true;
         foreach ( MissionObjective o in m.objectives ) {
@@ -788,11 +1629,12 @@ public class ConsoleGUI : MonoBehaviour {
                 addOutput( "" );
             }
             first = false;
-            addOutput( o.title + " - " + ( o.completed ? "" : "NOT " ) + "COMPLETED"
+            addOutput( formatStr( o.title, strFormat.HEADLINE ) + " - " + ( o.completed ? "" : "NOT " ) + "COMPLETED"
                 + "\n" + o.description );
         }
     }
     void testMissionCompletion() {
+        canAddMissionObjectives = false;
         foreach ( Mission m in missions ) {
             if ( !m.completed && m.accepted ) {
                 foreach ( MissionObjective o in m.objectives ) {
@@ -807,6 +1649,7 @@ public class ConsoleGUI : MonoBehaviour {
                 }
             }
         }
+        canAddMissionObjectives = true;
         Invoke( "testMissionCompletion", missionCompletionTestInterval );
     }
 
@@ -815,529 +1658,44 @@ public class ConsoleGUI : MonoBehaviour {
     // COMMANDS
     //
     ////////////////////////////////////////
-    bool isHelpParameter( string parameter ) {
-        switch ( parameter ) {
-            case "-?":
-            case "/?":
-            case "-h":
-            case "/h":
-            case "-help":
-            case "/help": {
-                return true;
-                }
-        }
-        return false;
-    }
-    bool shouldDisplayHelpNoParameter( Command cmd ) {
-        bool displayHelp = false;
-        if ( cmd.parameters.Count == 0 ) {
-            displayHelp = false;
-        } else if ( isHelpParameter( cmd.parameters[ 0 ] ) ) {
-            displayHelp = true;
-        }
-        return displayHelp;
-    }
-    bool shouldDisplayHelp( Command cmd ) {
-        bool displayHelp = false;
-        if ( cmd.parameters.Count == 0 ) {
-            displayHelp = true;
-        } else if ( isHelpParameter( cmd.parameters[ 0 ] ) ) {
-            displayHelp = true;
-        }
-        return displayHelp;
-    }
-
-    // Restart
-    void cmdRestart( Command cmd ) {
-        if ( shouldDisplayHelp( cmd ) ) {
-            outputHelp( cmd, "restart -y - restarts the game" );
-        } else {
-            if ( cmd.parameters[ 0 ] == "-y" ) {
-                Application.LoadLevel( Application.loadedLevel );
-            } else {
-                outputInvalidFormat( cmd, "restart -y" );
+    Command getBaseCommandFromString( string cmdName ) {
+        foreach ( Command cmd in commands ) {
+            if ( cmd.matchesInputCommandWithString( cmdName ) ) {
+                return cmd;
             }
         }
+        return null;
     }
-
-    // Connect
-    IEnumerator cmdConnect( Command cmd ) {
-        if ( shouldDisplayHelp( cmd ) ) {
-            outputHelp( cmd, "connect agent(a) <agent id #> - starts a session with the selected agent"
-                            + "\nEnter list agents to see available agents" );
-        } else {
-            switch ( cmd.parameters[ 0 ] ) {
-                case "a":
-                case "agent": {
-                    if ( cmd.parameters.Count > 1 ) {
-                        int agentId;
-                        if ( int.TryParse( cmd.parameters[ 1 ], out agentId ) ) {
-                            bool validInput = false;
-                            bool validAgent = false;
-                            Mission mission = new Mission( "", "", 0, 0, "" );
-                            foreach ( Mission m in missions ) {
-                                if ( m.agentId == agentId ) {
-                                    validInput = true;
-                                    mission = m;
-                                    if ( m.accepted && !m.completed ) {
-                                        validAgent = true;
-                                    }
-                                    break;
-                                }
-                            }
-                            if ( !validInput ) {
-                                addOutput( "Agent #" + agentId + " not found" );
-                            } else {
-                                if ( validAgent ) {
-                                    addOutput( "Establishing connection..." );
-                                    yield return new WaitForSeconds( 2.0f * timeScale );
-                                    addOutput( "Connection established" );
-                                    yield return new WaitForSeconds( 0.5f * timeScale );
-                                    addOutput( "Loading stream..." );
-                                    yield return new WaitForSeconds( 0.5f * timeScale );
-                                    addOutput( "Stream loaded" );
-                                    currentMission = mission;
-                                    currentAgentId = agentId;
-                                    connected = true;
-                                    Application.LoadLevel( mission.scene );
-                                } else {
-                                    addOutput( "The mission must be accepted before connecting to the agent."
-                                            + "\nEnter accept mission " + mission.id + " to accept the mission." );
-                                }
-                            }
-                        } else {
-                                outputInvalidFormat( cmd, "connect agent(a) <agent id #> - starts a session with the selected agent" );
-                            }
-                    } else {
-                        outputHelp( cmd, "connect agent(a) <agent id #> - starts a session with the selected agent"
-                                        + "\nEnter list agents to see available agents" );
-                    }
-                    break;
-                }
-                default: {
-                    outputHelp( cmd, "connect agent(a) <agent id #> - starts a session with the selected agent"
-                                        + "\nEnter list agents to see available agents" );
-                    break;
-                    }
+    Command getBaseCommandFromInput( CommandInput input ) {
+        input.commandName = input.baseCommandName;
+        foreach ( Command cmd in commands ) {
+            if ( cmd.matchesInputCommandWithCommandInput( input ) ) {
+                return cmd;
             }
         }
+        return null;
     }
-
-    // Disconnect
-    IEnumerator cmdDisconnect( Command cmd ) {
-        if ( shouldDisplayHelp( cmd ) ) {
-            outputHelp( cmd, "disconnect -y - disconnects from the current agent" );
-        } else {
-            if ( cmd.parameters[ 0 ] == "-y" ) {
-                addOutput( "Closing connection..." );
-                yield return new WaitForSeconds( 1.0f * timeScale );
-                addOutput( "Connection succesfully closed" );
-                connected = false;
-                Application.LoadLevel( "main" );
-            } else {
-                outputInvalidFormat( cmd, "disconnect -y" );
+    Command getCommandFromString( string cmdName, List<Command> cmdList ) {
+        foreach ( Command cmd in cmdList ) {
+            if ( cmd.matchesInputCommandWithString( cmdName ) ) {
+                return cmd;
             }
         }
+        return null;
     }
-
-    // List
-    void cmdList( Command cmd ) {
-        if ( shouldDisplayHelp( cmd ) ) {
-            outputHelp( cmd, "list missions(miss) - lists currently available missions"
-                             + "\nlist mission(m) <mission id #> - display details for the selected mission"
-                             + "\nlist agents(a) - lists available agents"
-                             + "\nlist systems(s) - lists systems of targeted object" );
-        } else {
-            switch ( cmd.parameters[ 0 ] ) {
-                case "miss":
-                case "missions": {
-                    bool listNotEmpty = false;
-
-                    // Not accepted mission
-                    bool missionListed = false;
-                    foreach ( Mission mission in missions ) {
-                        if ( !mission.accepted ) {
-                            if ( !missionListed ) {
-                                addOutput( "PENDING MISSIONS" );
-                                missionListed = true;
-                                listNotEmpty = true;
-                            }
-                            outputMissionInList( mission );
-                        }
-                    }
-
-                    // Active missions
-                    missionListed = false;
-                    foreach ( Mission mission in missions ) {
-                        if ( mission.accepted && !mission.completed ) {
-                            if ( !missionListed ) {
-                                addOutput( "ACTIVE MISSIONS" );
-                                missionListed = true;
-                                listNotEmpty = true;
-                            }
-                            outputMissionInList( mission );
-                        }
-                    }
-
-                    // Completed missions
-                    missionListed = false;
-                    foreach ( Mission mission in missions ) {
-                        if ( mission.completed ) {
-                            if ( !missionListed ) {
-                                addOutput( "COMPLETED MISSIONS" );
-                                missionListed = true;
-                                listNotEmpty = true;
-                            }
-                            outputMissionInList( mission );
-                        }
-                    }
-
-                    if ( !listNotEmpty ) {
-                        addOutput( "Your mission list is empty" );
-                    }
-                    break;
-                }
-                case "m":
-                case "mission": {
-                    if ( cmd.parameters.Count == 2 ) {
-                        int missionId;
-                        if ( int.TryParse( cmd.parameters[ 1 ], out missionId ) ) {
-                            bool missionListed = false;
-                            foreach ( Mission m in missions ) {
-                                if ( m.id == missionId ) {
-                                    outputMission( m );
-                                    missionListed = true;
-                                    break;
-                                }
-                            }
-                            if ( !missionListed ) {
-                                addOutput( "Unable to select mission " + missionId + ". List missions to see available missions." );
-                            }
-                        } else {
-                            outputInvalidFormat( cmd, "list mission <mission id #> - display details for the selected mission" );
-                        }
-                    } else {
-                        outputInvalidFormat( cmd, "list mission <mission id #> - display details for the selected mission" );
-                    }
-                    break;
-                }
-                case "a":
-                case "agents": {
-                    bool listNotEmpty = false;
-                    bool didOutput = false;
-                    foreach ( Mission m in missions ) {
-                        if ( m.accepted && !m.completed ) {
-                            if ( !didOutput ) {
-                                addOutput( "AVAILABLE AGENTS (ACTIVE MISSIONS):" );
-                                didOutput = true;
-                                listNotEmpty = true;
-                            }
-                            addOutput( "Agent #" + m.agentId + " for mission #" + m.id + ": " + m.title );
-                        }
-                    }
-
-                    didOutput = false;
-                    foreach ( Mission m in missions ) {
-                        if ( !m.accepted ) {
-                            if ( !didOutput ) {
-                                addOutput( "UNAVAILABLE AGENTS (PENDING MISSIONS):" );
-                                didOutput = true;
-                                listNotEmpty = true;
-                            }
-                            addOutput( "Agent #" + m.agentId + " for mission #" + m.id + ": " + m.title );
-                            didOutput = true;
-                        }
-                    }
-
-                    if ( !listNotEmpty ) {
-                        addOutput( "Your agent list is empty" );
-                    }
-
-                    break;
-                }
-                case "s":
-                case "systems": {
-                    outputCommandNotYetImplemented( cmd );
-                    break;
-                }
-                default: {
-                    outputInvalidFormat( cmd, "list missions(miss) - lists currently available missions"
-                             + "\nlist mission(m) <mission id #> - display details for the selected mission"
-                             + "\nlist agents(a) - lists available agents"
-                             + "\nlist systems(s) - lists systems of targeted object" );
-                    break;
-                }
+    Command getCurrentCommandFromInput( CommandInput input ) {
+        List<Command> cmdList = commands;
+        CommandInput currentInput = new CommandInput( input.fullCommandString );
+        Command cmd = getBaseCommandFromInput( currentInput );
+        while ( cmd != null && cmd.name != input.commandName && currentInput.parameters.Count > 0 ) {
+            cmd = getCommandFromString( currentInput.parameters[ 0 ], cmd.subCommands );
+            if ( cmd != null ) {
+                currentInput.commandName = cmd.name;
+                currentInput.parameters.RemoveAt( 0 );
             }
         }
+        return cmd;
     }
 
-    // Target
-    IEnumerator cmdTarget( Command cmd ) {
-        if ( cmd.parameters.Count == 0 ) {
-            if ( target == null ) {
-                addOutput( "No target selected" );
-            } else {
-                addOutput( "Target: " + target.displayName );
-            }
-        } else if ( shouldDisplayHelp( cmd ) ) {
-            outputHelp( cmd, "target - displays current target"
-                        + "\ntarget <target id> - targets the selected object"
-                        + "\ntarget deselect(des) - deselects the current target" );
-        } else {
-            switch ( cmd.parameters[ 0 ] ) {
-                case "des":
-                case "deselect": {
-                    if ( target != null ) {
-                        addOutput( "Deselecting target..." );
-                        yield return new WaitForSeconds( 0.5f * timeScale );
-                        target = null;
-                        addOutput( "No target selected" );
-                    } else {
-                        addOutput( "No target selected" );
-                    }
-                    break;
-                }
-                default: {
-                    if ( cmd.parameters.Count == 1 ) {
-                        GameObject[] objects = GameObject.FindGameObjectsWithTag( "Interactable" );
-                        Interactable interactable = null;
-                        foreach ( GameObject obj in objects ) {
-                            Interactable currentInteractable = obj.GetComponent<Interactable>();
-                            if ( currentInteractable != null ) {
-                                if ( currentInteractable.displayName.ToLower() == cmd.parameters[ 0 ] ) {
-                                    interactable = currentInteractable;
-                                    break;
-                                }
-                            }
-                        }
-                        if ( interactable != null ) {
-                            addOutput( "Locking target..." );
-                            yield return new WaitForSeconds( 1.0f * timeScale );
-                            this.target = interactable;
-                            addOutput( "Target " + target.displayName + " selected" );
-                        } else {
-                            addOutput( "Target not found: " + cmd.parameters[ 0 ] );
-                        }
-                    } else {
-                        outputHelp( cmd, "target - displays current target"
-                                    + "\ntarget <target id> - targets the selected object"
-                                    + "\ntarget deselect(des) - deselects the current target" );
-                    }
-                    break;
-                }
-            }
-        }
-    }
 
-    // Scan
-    IEnumerator cmdScan( Command cmd ) {
-        if ( shouldDisplayHelpNoParameter( cmd ) ) {
-            outputHelp( cmd, "scan - scans the targeted object" );
-        } else {
-            if ( target != null ) {
-                addOutput( "Scanning..." );
-                foreach ( InteractableSystem isystem in target.systems ) {
-                    yield return new WaitForSeconds( 0.1f * Random.Range( 1, 3 ) * timeScale );
-                    addOutput( isystem.displayName + " - id: " + isystem.name + " - " + ( isystem.enabled ? "ENABLED" : "DISABLED" ) );
-                }
-            } else {
-                addOutput( "No target selected" );
-            }
-        }
-    }
-
-    // Accept
-    void cmdAccept( Command cmd ) {
-        if ( shouldDisplayHelp( cmd ) ) {
-            outputHelp( cmd, "accept mission(m) <mission id #> - accepts selected mission"
-                             + "" );
-        } else {
-            switch ( cmd.parameters[ 0 ] ) {
-                case "m":
-                case "mission": {
-                    if ( cmd.parameters.Count == 2 ) {
-                        int missionId;
-                        if ( int.TryParse( cmd.parameters[ 1 ], out missionId ) ) {
-                            bool acceptedMission = false;
-                            foreach ( Mission m in missions ) {
-                                if ( m.id == missionId ) {
-                                    m.accepted = true;
-                                    addOutput( "Mission accepted" );
-                                    acceptedMission = true;
-                                    break;
-                                }
-                            }
-                            if ( !acceptedMission ) {
-                                addOutput( "Unable to accept mission " + missionId + ". List missions to see available missions" );
-                            }
-                        } else {
-                            outputInvalidFormat( cmd, "list mission(m) <mission id #> - display selected mission" );
-                        }
-                    } else {
-                        outputInvalidFormat( cmd, "accept mission(m) <mission id #> - accepts selected mission"
-                             + "" );
-                    }
-                    break;
-                }
-                default: {
-                    outputInvalidFormat( cmd, "accept mission(m) <mission id #> - accepts selected mission"
-                             + "" );
-                    break;
-                }
-            }
-        }
-    }
-
-    // Log out
-    IEnumerator cmdLogout( Command cmd ) {
-        if ( shouldDisplayHelpNoParameter( cmd ) ) {
-            outputHelp( cmd, "logout - logs you out of the system." );
-        } else {
-            if ( isLoggingIn ) {
-                StopCoroutine( displayWelcomeMessage() );
-            }
-            addOutput( "Logging out..." );
-            yield return new WaitForSeconds( 0.5f );
-            addOutput( "User successfully logged out" );
-            loggedIn = false;
-        }
-    }
-
-    // Log in
-    void cmdLogin( Command cmd ) {
-        if ( !isLoggingIn ) {
-            StartCoroutine( displayWelcomeMessage() );
-        }
-    }
-
-    // Options
-    void cmdOptions( Command cmd ) {
-        if ( shouldDisplayHelp( cmd ) ) {
-            outputHelp( cmd, "options sound - edit sound options"
-                            + "\noptions timescale(ts) - changes the time scale, which is cheating" );
-        } else {
-            switch ( cmd.parameters[ 0 ] ) {
-                case "sound": {
-                        if ( cmd.parameters.Count > 1 ) {
-                            switch ( cmd.parameters[ 1 ] ) {
-                                case "linefeed": {
-                                        if ( cmd.parameters.Count > 2 ) {
-                                            if ( cmd.parameters[ 2 ] == "on" ) {
-                                                lineFeedSoundEnabled = true;
-                                                addOutput( "Line feed sound enabled" );
-                                            } else if ( cmd.parameters[ 2 ] == "off" ) {
-                                                lineFeedSoundEnabled = false;
-                                                addOutput( "Line feed sound disabled" );
-                                            } else {
-                                                outputInvalidFormat( cmd, "options sound linefeed <on/off> - enable/disable line feed sound" );
-                                            }
-                                        } else {
-                                            addOutput( "Line feed sound is " + ( lineFeedSoundEnabled ? "on" : "off" ) + "\nenter options sound linefeed <on/off> to enable/disable it" );
-                                        }
-                                        break;
-                                    }
-                                default: {
-                                        outputHelp( cmd, "options sound linefeed <on/off> - enable/disable line feed sound" );
-                                        break;
-                                    }
-                            }
-                        } else {
-                            outputHelp( cmd, "options sound linefeed - options for linefeed sound" );
-                        }
-                        break;
-                    }
-                case "ts":
-                case "timescale": {
-                        if ( cmd.parameters.Count == 2 ) {
-                            float ts;
-                            if ( float.TryParse( cmd.parameters[ 1 ], out ts ) ) {
-                                timeScale = ts;
-                                addOutput( "Time scale is now " + timeScale );
-                            } else {
-                                outputInvalidFormat( cmd, "options timescale <timescale> - set timescale to given value. 1 = Normal timescale, 0 = Everything is instant" );
-                            }
-                        } else if ( cmd.parameters.Count == 1 ) {
-                            addOutput( "Time scale is " + timeScale );
-                        } else {
-                            outputInvalidFormat( cmd, "options timescale <timescale> - set timescale to given value. 1 = Normal timescale, 0 = Everything is instant" );
-                        }
-                        break;
-                    }
-                default: {
-                    outputHelp( cmd, "options sound - edit sound options"
-                            + "\noptions timescale(ts) - changes the time scale, which is cheating" );
-                    break;
-                    }
-
-            }
-        }
-    }
-
-    // Enable
-    IEnumerator cmdEnable( Command cmd ) {
-        if ( shouldDisplayHelp( cmd ) ) {
-            outputHelp( cmd, "enable <system id> - enables the selected system" );
-        } else {
-            if ( target == null ) {
-                addOutput( "No target selected" );
-            } else {
-                switch ( cmd.parameters[ 0 ] ) {
-                    default: {
-                            if ( cmd.parameters.Count == 1 ) {
-                                bool found = false;
-                                foreach ( InteractableSystem isystem in target.systems ) {
-                                    if ( isystem.name.ToLower() == cmd.parameters[ 0 ] ) {
-                                        found = true;
-                                        addOutput( "Enabling system..." );
-                                        yield return new WaitForSeconds( 0.5f * timeScale );
-                                        isystem.activate();
-                                        addOutput( isystem.response );
-                                    }
-                                }
-                                if ( !found ) {
-                                    addOutput( "System " + cmd.parameters[ 0 ] + " not found" );
-                                }
-                            } else {
-                                outputHelp( cmd, "enable <system id> - enables the selected system" );
-                            }
-                            break;
-                        }
-                }
-            }
-        }
-    }
-
-    // Disable
-    IEnumerator cmdDisable( Command cmd ) {
-        if ( shouldDisplayHelp( cmd ) ) {
-            outputHelp( cmd, "disable <system id> - disables the selected system" );
-        } else {
-            if ( target == null ) {
-                addOutput( "No target selected" );
-            } else {
-                switch ( cmd.parameters[ 0 ] ) {
-                    default: {
-                            if ( cmd.parameters.Count == 1 ) {
-                                bool found = false;
-                                foreach ( InteractableSystem isystem in target.systems ) {
-                                    if ( isystem.name.ToLower() == cmd.parameters[ 0 ] ) {
-                                        found = true;
-                                        addOutput( "Disabling system..." );
-                                        yield return new WaitForSeconds( 0.5f * timeScale );
-                                        isystem.deactivate();
-                                        addOutput( isystem.response );
-                                    }
-                                }
-                                if ( !found ) {
-                                    addOutput( "System " + cmd.parameters[ 0 ] + " not found" );
-                                }
-                            } else {
-                                outputHelp( cmd, "disable <system id> - disables the selected system" );
-                            }
-                            break;
-                        }
-                }
-            }
-        }
-    }
 }
