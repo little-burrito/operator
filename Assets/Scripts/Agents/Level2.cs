@@ -20,6 +20,8 @@ public class Level2 : Agent {
         yield return new WaitForSeconds( 1.0f * mainConsole.timeScale );
         addOutput( "Hey!" );
         yield return new WaitForSeconds( 2.0f * mainConsole.timeScale );
+        addOutput( "First of all, I just want to make it clear that this mission isn't fully created yet." );
+        yield return new WaitForSeconds( 4.0f * mainConsole.timeScale );
         addOutput( "I'm in a bit of trouble." );
         yield return new WaitForSeconds( 3.0f * mainConsole.timeScale );
         addOutput( "I need you to get me down." );
