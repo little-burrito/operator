@@ -55,6 +55,9 @@ public class ConsoleGUI : MonoBehaviour {
 
     public List<Note> notes;
 
+    public List<Timer> timers;
+    public bool availableToAddTimer = true;
+
     ////////////////////////////////////////
     //
     // SETUP
@@ -70,6 +73,7 @@ public class ConsoleGUI : MonoBehaviour {
         currentMarkerPosition = 0;
         currentSelectedCommandHistory = -1;
         notes = new List<Note>();
+        timers = new List<Timer>();
         cursorBlink = true;
         lineFeedSound = transform.Find( "Line feed sound" );
         StartCoroutine( displayWelcomeMessage() );
@@ -78,7 +82,6 @@ public class ConsoleGUI : MonoBehaviour {
         Invoke( "testMissionCompletion", missionCompletionTestInterval );
         currentMission = new Mission( "", "", -1, 0, "" );
     }
-	
 
     public static ConsoleGUI instance {
         get {
@@ -98,7 +101,7 @@ public class ConsoleGUI : MonoBehaviour {
             //If I am the first instance, make me the Singleton
             _instance = this;
             DontDestroyOnLoad( this );
-            initAgent();
+            StartCoroutine( initAgent() );
         } else {
             //If a Singleton already exists and you find
             //another reference in scene, destroy it!
@@ -173,6 +176,7 @@ public class ConsoleGUI : MonoBehaviour {
                     StartCoroutine( cutsceneSelectTarget( interactable ) );
                 } else {
                     addOutput( "Target not found: " + formatStr( input.parameters[ 0 ], strFormat.PARAMETER_IN_INSTRUCTION ) );
+                    addOutput( "Enter " + formatCmd( "target", "-help" ) + " for more information on the target command" );
                 }
             } else {
                 outputHelpForInput( input );
@@ -230,19 +234,12 @@ public class ConsoleGUI : MonoBehaviour {
         }
         commands.Add( cmd );
 
-        // Disconnect
-        cmd = new Command( "disconnect", new string[] { }, "Disconnects from an agent.", this, ( CommandInput input ) => {
-            if ( input.parameters.Count == 1 ) {
-                if ( input.parameters[ 0 ] == "-y" ) {
-                    StartCoroutine( cutsceneDisconnect() );
-                } else {
-                    outputHelpForInput( input );
-                }
-            } else {
-                outputHelpForInput( input );
-            }
-        }, new string[] { "-y" }, baseCommandCategories.MISSION );
+        // Scan
+        cmd = new Command( "scan", new string[] { }, "Scans and outputs the systems of the current target", this, ( CommandInput input ) => {
+            StartCoroutine( cutsceneScan() );
+        }, new string[] { }, baseCommandCategories.TARGET );
         cmd.requiresConnection = true;
+        cmd.requiresTarget = true;
         commands.Add( cmd );
 
         // Watch
@@ -306,7 +303,7 @@ public class ConsoleGUI : MonoBehaviour {
             cmd.subCommands.Add( subCmd );
 
             // List Mission
-            subCmd = new Command( "misson", new string[] { "singlemission" }, "Lists details for the selected mission.", this, ( CommandInput input ) => {
+            subCmd = new Command( "mission", new string[] { "singlemission" }, "Lists details for the selected mission.", this, ( CommandInput input ) => {
                 if ( input.parameters.Count == 1 || ( input.parameters.Count == 0 && currentMission.accepted ) ) {
                     if ( input.parameters.Count == 0 && currentMission.accepted ) {
                         // Do current mission
@@ -430,25 +427,6 @@ public class ConsoleGUI : MonoBehaviour {
         cmd.requiresLogin = false;
         commands.Add( cmd );
 
-        // Echo
-        cmd = new Command( "echo", new string[] { }, "Outputs text to the console.", this, ( CommandInput input ) => {
-            if ( input.parameters.Count > 0 ) {
-                addOutput( input.fullCommandString.Substring( input.commandName.Length + 1 ) );
-            } else {
-                outputHelpForInput( input );
-            }
-        }, new string[] { "text to output" }, baseCommandCategories.GENERAL );
-        cmd.requiresLogin = false;
-        commands.Add( cmd );
-
-        // Scan
-        cmd = new Command( "scan", new string[] { }, "Scans and outputs the systems of the current target", this, ( CommandInput input ) => {
-            StartCoroutine( cutsceneScan() );
-        }, new string[] { }, baseCommandCategories.TARGET );
-        cmd.requiresConnection = true;
-        cmd.requiresTarget = true;
-        commands.Add( cmd );
-
         // Accept
         cmd = new Command( "accept", new string[] { }, "Accepts a mission.", this, null, null, baseCommandCategories.MISSION );
         {
@@ -555,6 +533,21 @@ public class ConsoleGUI : MonoBehaviour {
         }
         commands.Add( cmd );
 
+        // Disconnect
+        cmd = new Command( "disconnect", new string[] { }, "Disconnects from an agent.", this, ( CommandInput input ) => {
+            if ( input.parameters.Count == 1 ) {
+                if ( input.parameters[ 0 ] == "-y" ) {
+                    StartCoroutine( cutsceneDisconnect() );
+                } else {
+                    outputHelpForInput( input );
+                }
+            } else {
+                outputHelpForInput( input );
+            }
+        }, new string[] { "-y" }, baseCommandCategories.MISSION );
+        cmd.requiresConnection = true;
+        commands.Add( cmd );
+
         // Quit
         cmd = new Command( "quit", new string[] { "exit" }, "Quits the game.", this, ( CommandInput input ) => {
             Application.Quit();
@@ -564,7 +557,19 @@ public class ConsoleGUI : MonoBehaviour {
         cmd.requiresLogout = true;
         commands.Add( cmd );
 
+        // Echo
+        cmd = new Command( "echo", new string[] { }, "Outputs text to the console.", this, ( CommandInput input ) => {
+            if ( input.parameters.Count > 0 ) {
+                addOutput( input.fullCommandString.Substring( input.commandName.Length + 1 ) );
+            } else {
+                outputHelpForInput( input );
+            }
+        }, new string[] { "text to output" }, baseCommandCategories.GENERAL );
+        cmd.requiresLogin = false;
+        commands.Add( cmd );
+
         // END OF COMMANDS
+
     }
 
     void outputNotes() {
@@ -576,6 +581,12 @@ public class ConsoleGUI : MonoBehaviour {
             addOutput( "You haven't taken any notes yet. Enter " + formatCmd( "note", new string[] { }, "your note" ) + " to take a note." );
         }
     }
+
+    ////////////////////////////////////////
+    //
+    // CUTSCENES
+    //
+    ////////////////////////////////////////
 
     // Connect cutscene
     IEnumerator cutsceneConnect( Mission mission, int agentId )  {
@@ -688,12 +699,6 @@ public class ConsoleGUI : MonoBehaviour {
         }
     }
 
-
-    ////////////////////////////////////////
-    //
-    // CUTSCENES
-    //
-    ////////////////////////////////////////
     IEnumerator displayWelcomeMessage() {
         isLoggingIn = true;
         addOutput( "Logging in..." );
@@ -715,36 +720,66 @@ public class ConsoleGUI : MonoBehaviour {
         yield return new WaitForSeconds( 1.0f * timeScale );
         addOutput( "Enter " + formatCmd( "help" ) + " to load the help file" );
         yield return new WaitForSeconds( 3.0f * timeScale );
-        int missionId = generateNewMissionId();
-        int agentId = generateNewAgentId();
-        Mission mission = new Mission( "Seize launch codes", "Agent " + formatStr( "#" + agentId, strFormat.ID ) + " is in need of assistance. You need to connect to the agent and retrieve the launch codes. Connect to agent " + formatStr( "#" + agentId, strFormat.ID ) + " by entering " + formatCmd( "connect", new string[] { "agent", "" + agentId } ) + " and take control of the situation.", missionId, agentId, "level1" );
-        mission.addObjective( new MissionObjective( "Connect to the agent", "Connect to the agent by entering " + formatCmd( "connect", new string[] { "agent", "" + agentId } ), 1, () => {
-            if ( Application.loadedLevelName == mission.scene ) {
-                return true;
-            }
-            return false;
-        }, () => {
-        } ) );
-        mission.addObjective( new MissionObjective( "Extract codes from the safe", "Get into the safe undiscovered and extract the codes from inside.", 3, () => {
-            GameObject[] interactables = GameObject.FindGameObjectsWithTag( "Interactable" );
-            foreach ( GameObject other in interactables ) {
-                Interactable interactable = other.GetComponent<Interactable>();
-                if ( interactable.id == 3 ) {
-                    foreach ( InteractableSystem isystem in interactable.systems ) {
-                        if ( isystem.id == InteractableSystemType.SAFE_LEAK_CODES ) {
-                            if ( isystem.enabled ) {
-                                return true;
+        if ( missions.Count == 0 ) {
+            int missionId = generateNewMissionId();
+            int agentId = generateNewAgentId();
+            Mission mission = new Mission( "Seize launch codes", "Agent " + formatStr( "#" + agentId, strFormat.ID ) + " is in need of assistance. You need to connect to the agent and retrieve the launch codes. Connect to agent " + formatStr( "#" + agentId, strFormat.ID ) + " by entering " + formatCmd( "connect", new string[] { "agent", "" + agentId } ) + " and take control of the situation.", missionId, agentId, "level1" );
+            mission.addObjective( new MissionObjective( "Connect to the agent", "Connect to the agent by entering " + formatCmd( "connect", new string[] { "agent", "" + agentId } ), 1, () => {
+                if ( Application.loadedLevelName == mission.scene ) {
+                    return true;
+                }
+                return false;
+            }, () => {
+            } ) );
+            mission.addObjective( new MissionObjective( "Extract codes from the safe", "Get into the safe undiscovered and extract the codes from inside.", 3, () => {
+                GameObject[] interactables = GameObject.FindGameObjectsWithTag( "Interactable" );
+                foreach ( GameObject other in interactables ) {
+                    Interactable interactable = other.GetComponent<Interactable>();
+                    if ( interactable.id == 3 ) {
+                        foreach ( InteractableSystem isystem in interactable.systems ) {
+                            if ( isystem.id == InteractableSystemType.SAFE_LEAK_CODES ) {
+                                if ( isystem.enabled ) {
+                                    return true;
+                                }
                             }
                         }
                     }
                 }
-            }
-            return false;
-        }, () => { } ) );
-        addMission( mission );
+                return false;
+            }, () => { } ) );
+            addMission( mission );
+            yield return new WaitForSeconds( 1.0f * timeScale );
+            int missionId2 = generateNewMissionId();
+            int agentId2 = generateNewAgentId();
+            Mission mission2 = new Mission( "Rescue agent", "Agent " + formatStr( "#" + agentId2, strFormat.ID ) + " is in need of assistance. You need to connect to agent " + formatStr( "#" + agentId2, strFormat.ID ) + " by entering " + formatCmd( "connect", new string[] { "agent", "" + agentId2 } ) + " and see how you can help. Do whatever is necessary.", missionId2, agentId2, "level2" );
+            mission2.addObjective( new MissionObjective( "Connect to the agent", "Connect to the agent by entering " + formatCmd( "connect", new string[] { "agent", "" + agentId2 } ), 1, () => {
+                if ( Application.loadedLevelName == mission2.scene ) {
+                    return true;
+                }
+                return false;
+            }, () => {
+            } ) );
+            mission2.addObjective( new MissionObjective( "Rescue the agent", "Get the agent out alive. Do whatever it takes.", 2, () => {
+                GameObject[] interactables = GameObject.FindGameObjectsWithTag( "Interactable" );
+                foreach ( GameObject other in interactables ) {
+                    Interactable interactable = other.GetComponent<Interactable>();
+                    if ( interactable.id == 0 ) {
+                        foreach ( InteractableSystem isystem in interactable.systems ) {
+                            if ( isystem.id == InteractableSystemType.DOOR_PROXIMITY_SENSOR ) {
+                                if ( !isystem.enabled ) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                return false;
+            }, () => { } ) );
+            addMission( mission2 );
+        }
         //yield return new WaitForSeconds( 10.0f * timeScale );
-        //MissionObjective objective = new MissionObjective( "Then what?", "This one was added later!", 4, mission );
-        //addMissionObjective( mission, objective );
+        //MissionObjective objective = new MissionObjective( "Then what?", "This one was added later!", 4, mission2 );
+        //addMissionObjective( mission2, objective );
     }
 
     ////////////////////////////////////////
@@ -781,6 +816,28 @@ public class ConsoleGUI : MonoBehaviour {
             }
         }
         return agentId;
+    }
+    Timer generateTimer( float time, Timer.OnComplete onComplete ) {
+        return new Timer( time, this, onComplete );
+    }
+    public IEnumerator addTimer( float time, Timer.OnComplete onComplete ) {
+        if ( availableToAddTimer ) {
+            timers.Add( new Timer( time, this, onComplete ) );
+        } else {
+            yield return new WaitForEndOfFrame();
+            StartCoroutine( addTimer( time, onComplete ) );
+        }
+    }
+    
+    ////////////////////////////////////////
+    //
+    // TIMERS
+    //
+    ////////////////////////////////////////
+    void FixedUpdate() {
+        foreach ( Timer timer in timers ) {
+            timer.tick();
+        }
     }
 	
     ////////////////////////////////////////
@@ -981,7 +1038,7 @@ public class ConsoleGUI : MonoBehaviour {
             didReceiveInput = true;
         }
 
-        // Autocomplete
+        // Auto complete
         if ( didReceiveInput ) {
             currentAutoCompleteSuggestion = "";
             string[] inputs = currentInput.Split( new string[] { " " }, System.StringSplitOptions.RemoveEmptyEntries );
@@ -996,13 +1053,13 @@ public class ConsoleGUI : MonoBehaviour {
                     string matchingWord = "";
                     // If it's not the last input parameter, it needs to match perfectly
                     if ( inputIterator != inputs.Length - 1 ) {
-                        if ( commandList[ i ].name == input ) {
+                        if ( commandList[ i ].name.ToLower() == input.ToLower() ) {
                             match = true;
                             matchingWord = commandList[ i ].name;
                         }
                         if ( !match ) {
                             foreach ( string alias in commandList[ i ].aliases ) {
-                                if ( alias == input ) {
+                                if ( alias.ToLower() == input.ToLower() ) {
                                     match = true;
                                     matchingWord = alias;
                                     break;
@@ -1011,13 +1068,13 @@ public class ConsoleGUI : MonoBehaviour {
                         }
                     } else {
                         // Otherwise at just needs to begin with the same letters
-                        if ( commandList[ i ].name.StartsWith( input ) ) {
+                        if ( commandList[ i ].name.ToLower().StartsWith( input.ToLower() ) ) {
                             match = true;
                             matchingWord = commandList[ i ].name;
                         }
                         if ( !match ) {
                             foreach ( string alias in commandList[ i ].aliases ) {
-                                if ( alias.StartsWith( input ) ) {
+                                if ( alias.ToLower().StartsWith( input.ToLower() ) ) {
                                     match = true;
                                     matchingWord = alias;
                                     break;
@@ -1027,14 +1084,14 @@ public class ConsoleGUI : MonoBehaviour {
                     }
                     // Match against -help
                     if ( !match && inputIterator != 0 ) {
-                        if ( helpCommand.name.StartsWith( input ) ) {
+                        if ( helpCommand.name.ToLower().StartsWith( input.ToLower() ) ) {
                             match = true;
                             matchesHelp = true;
                             matchingWord = helpCommand.name;
                         }
                         if ( !match ) {
                             foreach ( string alias in helpCommand.aliases ) {
-                                if ( alias.StartsWith( input ) ) {
+                                if ( alias.ToLower().StartsWith( input.ToLower() ) ) {
                                     match = true;
                                     matchesHelp = true;
                                     matchingWord = alias;
@@ -1056,13 +1113,13 @@ public class ConsoleGUI : MonoBehaviour {
                                 input = inputs[ inputIterator ];
                                 match = false;
                                 if ( !matchesHelp ) {
-                                    if ( helpCommand.name.StartsWith( input ) ) {
+                                    if ( helpCommand.name.ToLower().StartsWith( input.ToLower() ) ) {
                                         match = true;
                                         currentAutoCompleteSuggestion += helpCommand.name + " ";
                                     }
                                     if ( !match ) {
                                         foreach ( string alias in helpCommand.aliases ) {
-                                            if ( alias.StartsWith( input ) ) {
+                                            if ( alias.ToLower().StartsWith( input.ToLower() ) ) {
                                                 match = true;
                                                 currentAutoCompleteSuggestion += alias + " ";
                                                 break;
@@ -1094,6 +1151,18 @@ public class ConsoleGUI : MonoBehaviour {
 
         // Set input backup unless we're editing a previous command
         updateInputBackup();
+
+        List<Timer> timersToRemove = new List<Timer>();
+        availableToAddTimer = false;
+        foreach ( Timer timer in timers ) {
+            if ( timer.executeIfDone() ) {
+                timersToRemove.Add( timer );
+            }
+        }
+        availableToAddTimer = true;
+        foreach ( Timer timer in timersToRemove ) {
+            timers.Remove( timer );
+        }
 	}
 
     void inputRemoveCharacter() {
@@ -1323,16 +1392,24 @@ public class ConsoleGUI : MonoBehaviour {
     //
     ////////////////////////////////////////
     void OnLevelWasLoaded( int level ) {
-        initAgent();
+        StartCoroutine( initAgent() );
     }
-    public void initAgent() {
+    public IEnumerator initAgent() {
+        bool initialized = false;
         GameObject agentGameObject = GameObject.FindWithTag( "Agent" ) as GameObject;
         if ( agentGameObject != null ) {
             Agent agent = agentGameObject.GetComponent<Agent>();
-            if ( agent.mainConsole == null ) {
-                agent.mainConsole = this;
-                agent.setFromMainConsole();
+            if ( agent.init != null ) {
+                if ( agent.mainConsole == null ) {
+                    agent.mainConsole = this;
+                    agent.setFromMainConsole();
+                    initialized = true;
+                }
             }
+        }
+        if ( !initialized ) {
+            yield return new WaitForEndOfFrame();
+            StartCoroutine( initAgent() );
         }
     }
 
@@ -1695,11 +1772,11 @@ public class ConsoleGUI : MonoBehaviour {
             addOutput( formatStr( "General instructions:", strFormat.HEADLINE ) );
             addOutput( "You control everything using your console." );
             addOutput( "If you want more information about a specific command, or a shorthand for its parameters, you can enter " + formatCmd( "<command>", "-help" ) );
-            addOutput( "If you enter receive a " + formatStr( "suggestion", strFormat.AUTOCOMPLETE ) + " as you enter a command, press <enter> to enter that suggestion, <tab> to add the suggestion to what you're typing, or just ignore it and keep typing." );
+            addOutput( "If you receive a " + formatStr( "suggestion", strFormat.AUTOCOMPLETE ) + " as you enter a command, press <enter> to enter that suggestion, <tab> to add the suggestion to what you're typing, or just ignore it and keep typing." );
             addOutput( "To list available commands, enter " + formatCmd( "help" ) + " followed by one of the following chapter titles:" );
-            addOutput( "TARGET" );
-            addOutput( "MISSION" );
-            addOutput( "GENERAL" );
+            addOutput( formatStr( "TARGET", strFormat.PARAMETER_IN_INSTRUCTION ) );
+            addOutput( formatStr( "MISSION", strFormat.PARAMETER_IN_INSTRUCTION ) );
+            addOutput( formatStr( "GENERAL", strFormat.PARAMETER_IN_INSTRUCTION ) );
             addOutput( "Example: " + formatCmd( "help", "general" ) );
         } else {
             addOutput( formatStr( "List of available commands for chapter " + input.parameters[ 0 ].ToUpper(), strFormat.HEADLINE ) );
@@ -1936,8 +2013,6 @@ public class ConsoleGUI : MonoBehaviour {
         }
         return cmd;
     }
-
-
 }
 
 
@@ -1956,5 +2031,42 @@ public class Note {
     public void output() {
         console.addOutputWithSpacing( console.formatStr( timeOfEntry.ToString( ( "yyyy-MM-dd HH:mm:ss" ) ), ConsoleGUI.strFormat.HEADLINE ) );
         console.addOutput( note );
+    }
+}
+
+
+
+public class Timer {
+    public float time;
+    public delegate void OnComplete();
+    public OnComplete onComplete;
+    public ConsoleGUI console;
+    public bool shouldExecute;
+
+    public Timer ( float time, ConsoleGUI console, OnComplete onComplete ) {
+        this.time = time;
+        this.onComplete = onComplete;
+        this.console = console;
+        this.shouldExecute = false;
+    }
+
+    public void tick() {
+        if ( console.timeScale == 0 ) {
+            time = 0;
+        } else {
+            time -= Time.fixedDeltaTime / console.timeScale;
+        }
+
+        if ( time <= 0 ) {
+            shouldExecute = true;
+        }
+    }
+
+    public bool executeIfDone() {
+        if ( shouldExecute ) {
+            onComplete();
+            return true;
+        }
+        return false;
     }
 }

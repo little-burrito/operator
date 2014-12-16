@@ -31,7 +31,7 @@ public class Interactable : MonoBehaviour {
         }
         nameFront = Instantiate( textPrefab ) as GameObject;
         TextMesh textMesh = nameFront.GetComponent<TextMesh>();
-        textMesh.text = "Target: " + gameObject.name + "\nId: " + displayName;
+        textMesh.text = gameObject.name + "\nId: " + displayName;
         RotateTextTowardsCamera();
         HideOrShowText();
         systems = new List<InteractableSystem>();
