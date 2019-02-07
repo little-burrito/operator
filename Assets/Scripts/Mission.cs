@@ -33,6 +33,9 @@ public class Mission {
     }
 
     public bool completeMission() {
+        if ( objectives.Count == 0 ) {
+            return false;
+        }
         bool allCompleted = true;
         foreach ( MissionObjective objective in objectives ) {
             if ( !objective.completed ) {

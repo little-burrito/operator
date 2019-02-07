@@ -39,7 +39,7 @@ public class Level1 : Agent {
                 Interactable interactable = other.GetComponent<Interactable>();
                 if ( interactable.id == 1 ) {
                     foreach ( InteractableSystem isystem in interactable.systems ) {
-                        if ( isystem.id == InteractableSystemType.DOOR_OPENING_MECHANISM ) {
+                        if ( isystem.systemType == InteractableSystemType.DOOR_OPENING_MECHANISM ) {
                             if ( isystem.enabled ) {
                                 return true;
                             }
@@ -61,7 +61,7 @@ public class Level1 : Agent {
                     Interactable interactable = other.GetComponent<Interactable>();
                     if ( interactable.id == 1 ) {
                         foreach ( InteractableSystem isystem in interactable.systems ) {
-                            if ( isystem.id == InteractableSystemType.DOOR_OPENING_MECHANISM ) {
+                            if ( isystem.systemType == InteractableSystemType.DOOR_OPENING_MECHANISM ) {
                                 if ( isystem.enabled ) {
                                     waypoint++;
                                     StartCoroutine( secondDialog() );
@@ -77,7 +77,7 @@ public class Level1 : Agent {
                     Interactable interactable = other.GetComponent<Interactable>();
                     if ( interactable.id == 2 ) {
                         foreach ( InteractableSystem isystem in interactable.systems ) {
-                            if ( isystem.id == InteractableSystemType.DOOR_OPENING_MECHANISM ) {
+                            if ( isystem.systemType == InteractableSystemType.DOOR_OPENING_MECHANISM ) {
                                 if ( isystem.enabled ) {
                                     waypoint++;
                                     StartCoroutine( thirdDialog() );
@@ -93,7 +93,7 @@ public class Level1 : Agent {
                     Interactable interactable = other.GetComponent<Interactable>();
                     if ( interactable.id == 3 ) {
                         foreach ( InteractableSystem isystem in interactable.systems ) {
-                            if ( isystem.id == InteractableSystemType.SAFE_LEAK_CODES ) {
+                            if ( isystem.systemType == InteractableSystemType.SAFE_LEAK_CODES ) {
                                 if ( isystem.enabled ) {
                                     waypoint++;
                                     StartCoroutine( fourthDialog() );
@@ -125,7 +125,7 @@ public class Level1 : Agent {
     }
     public IEnumerator fourthDialog() {
         yield return new WaitForSeconds( 0.5f * mainConsole.timeScale );
-        addOutput( "Alright, so maybe this mission was quite as cool as it could have been." );
+        addOutput( "Alright, so maybe this mission wasn't quite as cool as it could have been." );
         yield return new WaitForSeconds( 3.0f * mainConsole.timeScale );
         addOutput( "The idea is that there would be two players at the same time." );
         yield return new WaitForSeconds( 3.0f * mainConsole.timeScale );

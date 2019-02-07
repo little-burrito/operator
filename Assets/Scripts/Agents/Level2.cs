@@ -20,8 +20,6 @@ public class Level2 : Agent {
         yield return new WaitForSeconds( 1.0f * mainConsole.timeScale );
         addOutput( "Hey!" );
         yield return new WaitForSeconds( 2.0f * mainConsole.timeScale );
-        addOutput( "First of all, I just want to make it clear that this mission isn't fully created yet." );
-        yield return new WaitForSeconds( 4.0f * mainConsole.timeScale );
         addOutput( "I'm in a bit of trouble." );
         yield return new WaitForSeconds( 3.0f * mainConsole.timeScale );
         addOutput( "I need you to get me down." );
@@ -37,8 +35,9 @@ public class Level2 : Agent {
                 Interactable interactable = other.GetComponent<Interactable>();
                 if ( interactable.id == 0 ) {
                     foreach ( InteractableSystem isystem in interactable.systems ) {
-                        if ( isystem.id == InteractableSystemType.DOOR_OPENING_MECHANISM ) {
-                            if ( isystem.enabled ) {
+                        if ( isystem.identifier == 1 ) {
+                            if ( !isystem.enabled ) {
+                                StartCoroutine( secondDialog() );
                                 return true;
                             }
                         }
@@ -51,7 +50,27 @@ public class Level2 : Agent {
         StartCoroutine( mainConsole.addMissionObjective( mission, objective ) );
         yield return new WaitForSeconds( 3.0f * mainConsole.timeScale );
         addOutput( "And you just take your time, a little blood to the head never killed anyone." );
-        yield return new WaitForSeconds( 5.0f * mainConsole.timeScale );
+        yield return new WaitForSeconds( 10.0f * mainConsole.timeScale );
         addOutput( "In fact, it's quite relaxing up here..." );
+    }
+
+    public IEnumerator secondDialog() {
+        StopCoroutine( firstDialog() );
+        addOutput( "THAT'S NOT QUITE WHAT I HAD IN MIND!" );
+        yield return new WaitForSeconds( 4.0f * mainConsole.timeScale );
+        addOutput( "Now I know who NOT to call next time." );
+        yield return new WaitForSeconds( 4.0f * mainConsole.timeScale );
+        addOutput( "You know what? Just leave me here. I'll be alright!" );
+        yield return new WaitForSeconds( 5.0f * mainConsole.timeScale );
+        while ( true ) {
+            addOutput( "Just enter " + mainConsole.formatCmd( "disconnect", "-y" ) + " and get out of here, okay?" );
+            yield return new WaitForSeconds( 5.0f * mainConsole.timeScale );
+            addOutput( "Yes, this was a short mission. Just get out!" );
+            yield return new WaitForSeconds( 4.0f * mainConsole.timeScale );
+            addOutput( "WHY ARE YOU STILL HERE!?" );
+            yield return new WaitForSeconds( 3.0f * mainConsole.timeScale );
+            addOutput( "Please, this is extremely embarassing." );
+            yield return new WaitForSeconds( 8.0f * mainConsole.timeScale );
+        }
     }
 }

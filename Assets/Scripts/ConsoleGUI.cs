@@ -408,6 +408,7 @@ public class ConsoleGUI : MonoBehaviour {
         cmd = new Command( "logout", new string[] { }, "Logs you out.", this, ( CommandInput input ) => {
             StartCoroutine( cutsceneLogout() );
         }, new string[] { }, baseCommandCategories.GENERAL );
+        cmd.requiresNoConnection = true;
         cmd.requiresLogin = true;
         commands.Add( cmd );
 
@@ -439,7 +440,8 @@ public class ConsoleGUI : MonoBehaviour {
                         foreach ( Mission m in missions ) {
                             if ( m.id == missionId ) {
                                 m.accepted = true;
-                                addOutput( "Mission accepted" );
+                                addOutput( "Mission accepted." );
+                                addOutput( "Connect to the agent by entering " + formatCmd( "connect", new string[] { "agent", "" + m.agentId } ) );
                                 acceptedMission = true;
                                 break;
                             }
@@ -599,8 +601,8 @@ public class ConsoleGUI : MonoBehaviour {
         addOutput( "Stream loaded" );
         currentMission = mission;
         currentAgentId = agentId;
-        connected = true;
         Application.LoadLevel( mission.scene );
+        connected = true;
     }
     
     // Disconnect cutscene
@@ -650,7 +652,7 @@ public class ConsoleGUI : MonoBehaviour {
             addOutput( "Scanning..." );
             foreach ( InteractableSystem isystem in target.systems ) {
                 yield return new WaitForSeconds( 0.1f * Random.Range( 1, 3 ) * timeScale );
-                addOutput( isystem.displayName + " - id: " + isystem.name + " - " + ( isystem.enabled ? "ENABLED" : "DISABLED" ) );
+                addOutput( isystem.name + " - id: " + isystem.id + " - " + ( isystem.enabled ? "ENABLED" : "DISABLED" ) );
             }
         } else {
             addOutput( "No target selected" );
@@ -662,7 +664,7 @@ public class ConsoleGUI : MonoBehaviour {
         if ( input.parameters.Count == 1 ) {
             bool found = false;
             foreach ( InteractableSystem isystem in target.systems ) {
-                if ( isystem.name.ToLower() == input.parameters[ 0 ] ) {
+                if ( isystem.id.ToLower() == input.parameters[ 0 ] ) {
                     found = true;
                     addOutput( "Enabling system..." );
                     yield return new WaitForSeconds( 0.5f * timeScale );
@@ -683,7 +685,7 @@ public class ConsoleGUI : MonoBehaviour {
         if ( input.parameters.Count == 1 ) {
             bool found = false;
             foreach ( InteractableSystem isystem in target.systems ) {
-                if ( isystem.name.ToLower() == input.parameters[ 0 ] ) {
+                if ( isystem.id.ToLower() == input.parameters[ 0 ] ) {
                     found = true;
                     addOutput( "Disabling system..." );
                     yield return new WaitForSeconds( 0.5f * timeScale );
@@ -737,7 +739,7 @@ public class ConsoleGUI : MonoBehaviour {
                     Interactable interactable = other.GetComponent<Interactable>();
                     if ( interactable.id == 3 ) {
                         foreach ( InteractableSystem isystem in interactable.systems ) {
-                            if ( isystem.id == InteractableSystemType.SAFE_LEAK_CODES ) {
+                            if ( isystem.systemType == InteractableSystemType.SAFE_LEAK_CODES ) {
                                 if ( isystem.enabled ) {
                                     return true;
                                 }
@@ -752,20 +754,20 @@ public class ConsoleGUI : MonoBehaviour {
             int missionId2 = generateNewMissionId();
             int agentId2 = generateNewAgentId();
             Mission mission2 = new Mission( "Rescue agent", "Agent " + formatStr( "#" + agentId2, strFormat.ID ) + " is in need of assistance. You need to connect to agent " + formatStr( "#" + agentId2, strFormat.ID ) + " by entering " + formatCmd( "connect", new string[] { "agent", "" + agentId2 } ) + " and see how you can help. Do whatever is necessary.", missionId2, agentId2, "level2" );
-            mission2.addObjective( new MissionObjective( "Connect to the agent", "Connect to the agent by entering " + formatCmd( "connect", new string[] { "agent", "" + agentId2 } ), 1, () => {
+            /*mission2.addObjective( new MissionObjective( "Connect to the agent", "Connect to the agent by entering " + formatCmd( "connect", new string[] { "agent", "" + agentId2 } ), 1, () => {
                 if ( Application.loadedLevelName == mission2.scene ) {
                     return true;
                 }
                 return false;
             }, () => {
-            } ) );
-            mission2.addObjective( new MissionObjective( "Rescue the agent", "Get the agent out alive. Do whatever it takes.", 2, () => {
+            } ) );*/
+            /*mission2.addObjective( new MissionObjective( "Rescue the agent", "Get the agent out alive. Do whatever it takes.", 2, () => {
                 GameObject[] interactables = GameObject.FindGameObjectsWithTag( "Interactable" );
                 foreach ( GameObject other in interactables ) {
                     Interactable interactable = other.GetComponent<Interactable>();
                     if ( interactable.id == 0 ) {
                         foreach ( InteractableSystem isystem in interactable.systems ) {
-                            if ( isystem.id == InteractableSystemType.DOOR_PROXIMITY_SENSOR ) {
+                            if ( isystem.systemType == InteractableSystemType.DOOR_PROXIMITY_SENSOR ) {
                                 if ( !isystem.enabled ) {
                                     return true;
                                 }
@@ -774,7 +776,7 @@ public class ConsoleGUI : MonoBehaviour {
                     }
                 }
                 return false;
-            }, () => { } ) );
+            }, () => { } ) */
             addMission( mission2 );
         }
         //yield return new WaitForSeconds( 10.0f * timeScale );
@@ -1941,13 +1943,21 @@ public class ConsoleGUI : MonoBehaviour {
             + "\n" + m.description + "\n\n" + formatStr( "OBJECTIVES", strFormat.HEADLINE ) );
 
         bool first = true;
-        foreach ( MissionObjective o in m.objectives ) {
-            if ( !first ) {
-                addOutput( "" );
+        if ( m.objectives.Count > 0 ) {
+            foreach ( MissionObjective o in m.objectives ) {
+                if ( !first ) {
+                    addOutput( "" );
+                }
+                first = false;
+                addOutput( formatStr( o.title, strFormat.HEADLINE ) + " - " + ( o.completed ? "" : "NOT " ) + "COMPLETED"
+                    + "\n" + o.description );
             }
-            first = false;
-            addOutput( formatStr( o.title, strFormat.HEADLINE ) + " - " + ( o.completed ? "" : "NOT " ) + "COMPLETED"
-                + "\n" + o.description );
+        } else {
+            addOutput( "Awaiting objectives. Connect to the agent by entering " + formatCmd( "connect", new string[] { "agent", "" + m.agentId } ) + " and await further instructions." );
+        }
+
+        if ( !m.accepted ) {
+            addOutput( "\n" + "- Enter " + formatCmd( "accept", new string[] { "mission", "" + m.id } ) + " to accept this mission." );
         }
     }
     void testMissionCompletion() {

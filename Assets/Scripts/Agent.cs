@@ -97,6 +97,7 @@ public class Agent : MonoBehaviour {
             GUI.Box( new Rect( Screen.width * 0.7f, Screen.height * 0.7f, Screen.width * 0.3f, Screen.height * 0.3f ), new GUIContent( "" ), chatBackgroundStyle );
 
             // Comms
+            consoleFontStyle.clipping = TextClipping.Clip;
             string output = "";
             for ( int i = outputHistory.Count - 1; i >= currentlyVisibleLine; i-- ) {
                 output += "\n" + outputHistory[ i ];
